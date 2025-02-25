@@ -95,7 +95,13 @@ def format_percentage(value):
     """Format float as percentage"""
     if pd.isna(value):
         return "N/A"
-    return f"{value:.2%}"
+    try:
+        # Convert to float if it's a string
+        if isinstance(value, str):
+            value = float(value.strip('%')) / 100
+        return f"{float(value):.2%}"
+    except (ValueError, TypeError):
+        return str(value)
 
 def calculate_benchmarks(df, group_by_column):
     """Calculate benchmark metrics for a given grouping"""
