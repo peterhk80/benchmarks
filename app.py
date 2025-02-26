@@ -46,14 +46,21 @@ st.markdown("""
             font-size: 1.8rem !important;
             font-weight: 500 !important;
             padding: 0.5rem 0 !important;
+            font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
         }
         h2 {
             font-size: 1.4rem !important;
-            font-weight: 500 !important;
+            font-weight: 700 !important;  /* Made section headers bold */
+            font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
         }
         h3 {
             font-size: 1.2rem !important;
             font-weight: 500 !important;
+            font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
+        }
+        /* Set default font for all text */
+        .stMarkdown, .stText {
+            font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -154,54 +161,82 @@ def format_percentage(value):
 
 def calculate_benchmarks(df, group_by_column):
     """Calculate benchmark metrics for a given grouping"""
-    benchmarks = df.groupby(group_by_column).agg({
+    # Define all possible metrics
+    metrics = {
         'Delivered_Impressions': ['mean', 'sum', 'count'],
-        'Engagement_Rate': 'mean',
-        'Click_Rate': 'mean',
-        'Video_User_Completion_Rate': 'mean',
-        'Avg_Host_Video_Duration_secs': 'mean'
-    }).round(4)
+        'Engagement_Rate': ['mean'],
+        'Click_Rate': ['mean'],
+        'Video_User_Completion_Rate': ['mean'],
+        'Avg_Host_Video_Duration_secs': ['mean']
+    }
     
-    benchmarks.columns = ['Avg_Impressions', 'Total_Impressions', 'Campaign_Count', 
-                         'Avg_Engagement_Rate', 'Avg_Click_Rate', 
-                         'Avg_Video_Completion_Rate', 'Avg_Video_Duration']
+    # Filter to only use metrics that exist in the dataframe
+    available_metrics = {}
+    missing_metrics = []
+    for col, aggs in metrics.items():
+        if col in df.columns:
+            available_metrics[col] = aggs
+        else:
+            missing_metrics.append(col)
     
-    # Format percentage columns
-    percentage_cols = ['Avg_Engagement_Rate', 'Avg_Click_Rate', 'Avg_Video_Completion_Rate']
+    # If we have no metrics at all, raise an error
+    if not available_metrics:
+        raise ValueError("No valid metrics found in the data")
+    
+    # Calculate benchmarks with available metrics
+    benchmarks = df.groupby(group_by_column).agg(available_metrics).round(4)
+    
+    # Flatten column names if we have multi-level columns
+    if isinstance(benchmarks.columns, pd.MultiIndex):
+        benchmarks.columns = [f"{col[0]}_{col[1]}" for col in benchmarks.columns]
+    
+    # Format percentage columns if they exist
+    percentage_cols = [col for col in benchmarks.columns if any(x in col for x in ['Rate', 'rate'])]
     for col in percentage_cols:
         benchmarks[col] = benchmarks[col].apply(format_percentage)
     
-    return benchmarks
+    return benchmarks, missing_metrics
 
 def set_chart_style(fig):
     """Apply consistent styling to all charts"""
     fig.update_layout(
         font=dict(
             family="Helvetica Neue Light, Helvetica, Arial, sans-serif",
-            size=12  # Base font size
+            size=16  # Increased base font size
         ),
         width=1200,  # Wider charts
         height=600,
-        margin=dict(t=50, b=50, l=50, r=50),
-        title_x=0.5,  # Center title
-        title_y=0.95,
+        margin=dict(t=80, b=50, l=50, r=50),  # Increased top margin for title
+        title=dict(
+            x=0,  # Left-align title
+            y=0.98,  # Position at top
+            xanchor='left',
+            font=dict(
+                size=24,  # Larger title font
+                family="Helvetica Neue Light, Helvetica, Arial, sans-serif"
+            )
+        ),
         xaxis=dict(
-            tickfont=dict(size=14),  # Larger tick labels
-            title_font=dict(size=14)  # Larger axis titles
+            tickfont=dict(size=16),
+            title_font=dict(size=18)
         ),
         yaxis=dict(
-            tickfont=dict(size=14),  # Larger tick labels
-            title_font=dict(size=14)  # Larger axis titles
+            tickfont=dict(size=16),
+            title_font=dict(size=18)
         ),
         legend=dict(
-            font=dict(size=14)  # Larger legend text
+            font=dict(size=16),
+            title_font=dict(size=18)
         )
     )
     
     # Increase size of data labels if they exist
-    if 'text' in fig.data[0]:
+    if hasattr(fig.data[0], 'text'):
         for trace in fig.data:
-            trace.textfont = dict(size=14)
+            trace.textfont = dict(
+                size=16,
+                family="Helvetica Neue Light, Helvetica, Arial, sans-serif"
+            )
     
     return fig
 
@@ -642,32 +677,27 @@ def main():
         st.session_state.df = None
     
     with tab1:
-        # File upload section with a cleaner layout
+        # Simple file upload section
         st.write("### Upload Campaign Data")
+        uploaded_file = st.file_uploader("Upload your campaign data CSV file", type=['csv'])
         
-        # Create two columns for upload and help text
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            uploaded_file = st.file_uploader("Upload your campaign data CSV file", type=['csv'])
-        
-        with col2:
-            with st.expander("ℹ️ Need help with the file format?"):
-                st.write("""
-                **Required columns:**
-                - Delivered_Impressions (numeric)
-                - Engagement_Rate (percentage)
-                - Click_Rate (percentage)
-                - Format (text)
-                - Size (text)
-                - Placement_Name (text)
-                - Vertical (text)
-                
-                **Optional columns:**
-                - Creative_URL (for creative analysis)
-                - Video metrics (for video performance analysis)
-                - Device metrics (for device performance analysis)
-                """)
+        # Simple help text below with icon
+        with st.expander("📋 View expected CSV format"):
+            st.write("""
+            **Required columns:**
+            - Delivered_Impressions (numeric)
+            - Engagement_Rate (percentage)
+            - Click_Rate (percentage)
+            - Format (text)
+            - Size (text)
+            - Placement_Name (text)
+            - Vertical (text)
+            
+            **Optional columns:**
+            - Creative_URL (for creative analysis)
+            - Video metrics (for video performance analysis)
+            - Device metrics (for device performance analysis)
+            """)
         
         if uploaded_file is not None:
             try:
@@ -693,10 +723,10 @@ def main():
                         st.error(f"- {error}")
                     st.stop()
                 
+                # Store non-critical issues
+                data_issues = []
                 if warnings:
-                    st.warning("Potential issues found in your data:")
-                    for warning in warnings:
-                        st.warning(f"- {warning}")
+                    data_issues.extend(warnings)
                 
                 # Clean and validate data
                 cleaned_df, error = clean_and_validate_data(df)
@@ -711,102 +741,122 @@ def main():
                 # Simple success message with scroll instruction
                 st.success("✅ Data loaded successfully! Scroll down to view your benchmark report.")
                 
+                # Show non-critical issues in expandable section if there are any
+                if data_issues:
+                    with st.expander("ℹ️ View Data Quality Notes"):
+                        for issue in data_issues:
+                            st.info(issue)
+                
                 # Main benchmark categories
                 benchmark_categories = ['Format', 'Size', 'Placement_Name', 'Vertical']
                 selected_category = st.selectbox("Select benchmark category:", benchmark_categories)
                 
                 if selected_category in df.columns:
-                    # Calculate and display benchmarks
-                    benchmarks = calculate_benchmarks(df, selected_category)
-                    st.subheader(f"Benchmark Metrics by {selected_category}")
-                    st.dataframe(benchmarks)
-                    
-                    # Download button for benchmarks
-                    st.markdown(get_download_link(benchmarks, 
-                                               f'benchmarks_{selected_category}.csv',
-                                               'Download Benchmark Data'), 
-                              unsafe_allow_html=True)
-                    
-                    # Engagement Rate visualization
-                    st.subheader("Engagement Rate Analysis")
-                    eng_fig = create_benchmark_visualization(
-                        benchmarks, 'Avg_Engagement_Rate', 
-                        selected_category, 'Average Engagement Rate'
-                    )
-                    st.plotly_chart(eng_fig)
-                    st.markdown(get_download_link(eng_fig.to_html(), 
-                                               f'engagement_rate_{selected_category}.html',
-                                               'Download Chart'), 
-                              unsafe_allow_html=True)
-                    
-                    # Click Rate visualization
-                    st.subheader("Click Rate Analysis")
-                    click_fig = create_benchmark_visualization(
-                        benchmarks, 'Avg_Click_Rate',
-                        selected_category, 'Average Click Rate'
-                    )
-                    st.plotly_chart(click_fig)
-                    st.markdown(get_download_link(click_fig.to_html(),
-                                               f'click_rate_{selected_category}.html',
-                                               'Download Chart'),
-                              unsafe_allow_html=True)
-                    
-                    # Video completion analysis
-                    if 'Video_User_Completion_Rate' in df.columns:
-                        st.subheader("Video Performance Analysis")
-                        video_fig = analyze_video_dropoff(df, selected_category)
-                        st.plotly_chart(video_fig)
-                        st.markdown(get_download_link(video_fig.to_html(),
-                                                   f'video_completion_{selected_category}.html',
+                    try:
+                        # Calculate and display benchmarks
+                        benchmarks, missing_metrics = calculate_benchmarks(df, selected_category)
+                        
+                        # Show missing metrics in expandable section if there are any
+                        if missing_metrics:
+                            with st.expander("ℹ️ View Missing Metrics"):
+                                st.info("Some metrics are not available in your data:")
+                                for metric in missing_metrics:
+                                    st.write(f"- {metric}")
+                        
+                        st.subheader(f"Benchmark Metrics by {selected_category}")
+                        st.dataframe(benchmarks)
+                        
+                        # Download button for benchmarks
+                        st.markdown(get_download_link(benchmarks, 
+                                                   f'benchmarks_{selected_category}.csv',
+                                                   'Download Benchmark Data'), 
+                                  unsafe_allow_html=True)
+                        
+                        # Engagement Rate visualization
+                        st.subheader("Engagement Rate Analysis")
+                        eng_fig = create_benchmark_visualization(
+                            benchmarks, 'Avg_Engagement_Rate', 
+                            selected_category, 'Average Engagement Rate'
+                        )
+                        st.plotly_chart(eng_fig)
+                        st.markdown(get_download_link(eng_fig.to_html(), 
+                                                   f'engagement_rate_{selected_category}.html',
+                                                   'Download Chart'), 
+                                  unsafe_allow_html=True)
+                        
+                        # Click Rate visualization
+                        st.subheader("Click Rate Analysis")
+                        click_fig = create_benchmark_visualization(
+                            benchmarks, 'Avg_Click_Rate',
+                            selected_category, 'Average Click Rate'
+                        )
+                        st.plotly_chart(click_fig)
+                        st.markdown(get_download_link(click_fig.to_html(),
+                                                   f'click_rate_{selected_category}.html',
                                                    'Download Chart'),
                                   unsafe_allow_html=True)
-                    
-                    # Enhanced Device Performance Analysis
-                    st.subheader("Device Performance Analysis")
-                    
-                    # Overall device metrics
-                    device_pie, device_rates = create_device_visualization(df, selected_category)
-                    
-                    # Display device distribution
-                    st.plotly_chart(device_pie)
-                    st.markdown(get_download_link(device_pie.to_html(),
-                                               'device_distribution.html',
-                                               'Download Distribution Chart'),
-                              unsafe_allow_html=True)
-                    
-                    # Display device performance metrics
-                    st.plotly_chart(device_rates)
-                    st.markdown(get_download_link(device_rates.to_html(),
-                                               'device_performance.html',
-                                               'Download Performance Chart'),
-                              unsafe_allow_html=True)
-                    
-                    # Detailed device performance by category
-                    st.write("Detailed Device Performance by Category:")
-                    device_perf = analyze_device_performance(df, selected_category)
-                    st.dataframe(device_perf)
-                    st.markdown(get_download_link(device_perf,
-                                               f'device_performance_{selected_category}.csv',
-                                               'Download Detailed Device Data'),
-                              unsafe_allow_html=True)
-                    
-                    # Additional Insights
-                    st.subheader("Additional Insights")
-                    trends = analyze_trends(df)
-                    
-                    # Device Distribution
-                    st.write("Device Distribution:")
-                    device_dist = pd.DataFrame(trends['device_distribution'].items(), 
-                                             columns=['Device', 'Percentage'])
-                    device_dist['Percentage'] = device_dist['Percentage'].apply(format_percentage)
-                    st.dataframe(device_dist)
-                    
-                    # Video Performance
-                    if trends['video_metrics']['avg_completion_rate'] > 0:
-                        st.write("Video Performance Metrics:")
-                        st.write(f"- Average Video Completion Rate: {format_percentage(trends['video_metrics']['avg_completion_rate'])}")
-                        st.write(f"- Average Video Duration: {trends['video_metrics']['avg_duration']:.2f} seconds")
-                    
+                        
+                        # Video completion analysis
+                        if 'Video_User_Completion_Rate' in df.columns:
+                            st.subheader("Video Performance Analysis")
+                            video_fig = analyze_video_dropoff(df, selected_category)
+                            st.plotly_chart(video_fig)
+                            st.markdown(get_download_link(video_fig.to_html(),
+                                                       f'video_completion_{selected_category}.html',
+                                                       'Download Chart'),
+                                      unsafe_allow_html=True)
+                        
+                        # Enhanced Device Performance Analysis
+                        st.subheader("Device Performance Analysis")
+                        
+                        # Overall device metrics
+                        device_pie, device_rates = create_device_visualization(df, selected_category)
+                        
+                        # Display device distribution
+                        st.plotly_chart(device_pie)
+                        st.markdown(get_download_link(device_pie.to_html(),
+                                                   'device_distribution.html',
+                                                   'Download Distribution Chart'),
+                                  unsafe_allow_html=True)
+                        
+                        # Display device performance metrics
+                        st.plotly_chart(device_rates)
+                        st.markdown(get_download_link(device_rates.to_html(),
+                                                   'device_performance.html',
+                                                   'Download Performance Chart'),
+                                  unsafe_allow_html=True)
+                        
+                        # Detailed device performance by category
+                        st.write("Detailed Device Performance by Category:")
+                        device_perf = analyze_device_performance(df, selected_category)
+                        st.dataframe(device_perf)
+                        st.markdown(get_download_link(device_perf,
+                                                   f'device_performance_{selected_category}.csv',
+                                                   'Download Detailed Device Data'),
+                                  unsafe_allow_html=True)
+                        
+                        # Additional Insights
+                        st.subheader("Additional Insights")
+                        trends = analyze_trends(df)
+                        
+                        # Device Distribution
+                        st.write("Device Distribution:")
+                        device_dist = pd.DataFrame(trends['device_distribution'].items(), 
+                                                 columns=['Device', 'Percentage'])
+                        device_dist['Percentage'] = device_dist['Percentage'].apply(format_percentage)
+                        st.dataframe(device_dist)
+                        
+                        # Video Performance
+                        if trends['video_metrics']['avg_completion_rate'] > 0:
+                            st.write("Video Performance Metrics:")
+                            st.write(f"- Average Video Completion Rate: {format_percentage(trends['video_metrics']['avg_completion_rate'])}")
+                            st.write(f"- Average Video Duration: {trends['video_metrics']['avg_duration']:.2f} seconds")
+                        
+                    except Exception as e:
+                        st.error(f"Error processing benchmarks: {str(e)}")
+                        st.error("Full error details:")
+                        st.exception(e)
+                
                 else:
                     st.warning(f"Column {selected_category} not found in the data")
                 
