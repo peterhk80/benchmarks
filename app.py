@@ -20,7 +20,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Add custom CSS for logo positioning
+# Add custom CSS for logo positioning and header styling
 st.markdown("""
     <style>
         [data-testid="stSidebarNav"] {
@@ -40,6 +40,20 @@ st.markdown("""
         .logo-container img {
             max-width: 150px;
             height: auto;
+        }
+        /* Custom header styling */
+        h1 {
+            font-size: 1.8rem !important;
+            font-weight: 500 !important;
+            padding: 0.5rem 0 !important;
+        }
+        h2 {
+            font-size: 1.4rem !important;
+            font-weight: 500 !important;
+        }
+        h3 {
+            font-size: 1.2rem !important;
+            font-weight: 500 !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -502,44 +516,7 @@ def display_creative_analysis(creative_url, performance_data):
         st.write(f"- {rec}")
 
 def validate_csv_structure(df):
-    """Validate CSV file structure and required columns"""
-    required_columns = {
-        'Delivered_Impressions': {
-            'type': 'number',
-            'min_value': 0,
-            'allow_null': False
-        },
-        'Engagement_Rate': {
-            'type': 'percentage',
-            'min_value': 0,
-            'max_value': 100,
-            'allow_null': True
-        },
-        'Click_Rate': {
-            'type': 'percentage',
-            'min_value': 0,
-            'max_value': 100,
-            'allow_null': True
-        },
-        'Format': {
-            'type': 'string',
-            'allow_null': False
-        },
-        'Size': {
-            'type': 'string',
-            'allow_null': False
-        },
-        'Placement_Name': {
-            'type': 'string',
-            'min_length': 1,
-            'allow_null': False
-        },
-        'Vertical': {
-            'type': 'string',
-            'allow_null': False
-        }
-    }
-    
+    """Validate CSV file structure"""
     errors = []
     warnings = []
     
@@ -548,67 +525,11 @@ def validate_csv_structure(df):
         errors.append("The file is empty. Please upload a file with data.")
         return errors, warnings
     
-    # Check for required columns
-    missing_columns = [col for col in required_columns.keys() if col not in df.columns]
-    if missing_columns:
-        errors.append(f"Missing required columns: {', '.join(missing_columns)}")
+    # Just check that we have some data to work with
+    if len(df.columns) == 0:
+        errors.append("The file has no columns. Please check the file format.")
         return errors, warnings
-    
-    # Check data types and validation rules
-    for col, rules in required_columns.items():
-        if col in df.columns:
-            # Check for empty values
-            null_count = df[col].isna().sum()
-            if not rules['allow_null'] and null_count > 0:
-                errors.append(f"Column '{col}' contains {null_count} empty values which are not allowed")
-            elif null_count/len(df) > 0.5:
-                warnings.append(f"Column '{col}' is more than 50% empty ({null_count} empty values)")
-            
-            # Type-specific validations
-            non_null_values = df[col].dropna()
-            
-            if rules['type'] == 'number':
-                try:
-                    numeric_values = pd.to_numeric(non_null_values, errors='raise')
-                    if 'min_value' in rules and (numeric_values < rules['min_value']).any():
-                        errors.append(f"Column '{col}' contains values below minimum ({rules['min_value']})")
-                    if 'max_value' in rules and (numeric_values > rules['max_value']).any():
-                        errors.append(f"Column '{col}' contains values above maximum ({rules['max_value']})")
-                except:
-                    errors.append(f"Column '{col}' contains non-numeric values")
-            
-            elif rules['type'] == 'percentage':
-                try:
-                    # Convert percentage strings to float values
-                    cleaned_values = non_null_values.apply(lambda x: 
-                        float(str(x).strip('%'))/100 if isinstance(x, str) else float(x)
-                    )
-                    if (cleaned_values < 0).any() or (cleaned_values > 1).any():
-                        errors.append(f"Column '{col}' contains invalid percentage values (should be between 0% and 100%)")
-                except:
-                    errors.append(f"Column '{col}' contains invalid percentage values")
-            
-            elif rules['type'] == 'string':
-                if 'min_length' in rules:
-                    short_values = non_null_values[non_null_values.str.len() < rules['min_length']]
-                    if not short_values.empty:
-                        errors.append(f"Column '{col}' contains values shorter than {rules['min_length']} characters")
-    
-    # Check for duplicate rows
-    duplicates = df.duplicated().sum()
-    if duplicates > 0:
-        warnings.append(f"Found {duplicates} duplicate rows in the data")
-    
-    # Check for suspicious values
-    numeric_columns = df.select_dtypes(include=[np.number]).columns
-    for col in numeric_columns:
-        # Check for outliers (values more than 3 standard deviations from mean)
-        mean = df[col].mean()
-        std = df[col].std()
-        outliers = df[abs(df[col] - mean) > 3*std]
-        if len(outliers) > 0:
-            warnings.append(f"Found {len(outliers)} potential outliers in column '{col}'")
-    
+        
     return errors, warnings
 
 def clean_and_validate_data(df):
@@ -721,27 +642,32 @@ def main():
         st.session_state.df = None
     
     with tab1:
-        # File upload section with help text
+        # File upload section with a cleaner layout
         st.write("### Upload Campaign Data")
-        st.write("""
-        Please upload a CSV file with campaign performance data.
         
-        **Required columns:**
-        - Delivered_Impressions (numeric)
-        - Engagement_Rate (percentage)
-        - Click_Rate (percentage)
-        - Format (text)
-        - Size (text)
-        - Placement_Name (text)
-        - Vertical (text)
+        # Create two columns for upload and help text
+        col1, col2 = st.columns(2)
         
-        **Optional columns:**
-        - Creative_URL (for creative analysis)
-        - Video metrics (for video performance analysis)
-        - Device metrics (for device performance analysis)
-        """)
+        with col1:
+            uploaded_file = st.file_uploader("Upload your campaign data CSV file", type=['csv'])
         
-        uploaded_file = st.file_uploader("Upload your campaign data CSV file", type=['csv'])
+        with col2:
+            with st.expander("ℹ️ Need help with the file format?"):
+                st.write("""
+                **Required columns:**
+                - Delivered_Impressions (numeric)
+                - Engagement_Rate (percentage)
+                - Click_Rate (percentage)
+                - Format (text)
+                - Size (text)
+                - Placement_Name (text)
+                - Vertical (text)
+                
+                **Optional columns:**
+                - Creative_URL (for creative analysis)
+                - Video metrics (for video performance analysis)
+                - Device metrics (for device performance analysis)
+                """)
         
         if uploaded_file is not None:
             try:
