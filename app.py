@@ -49,25 +49,6 @@ st.markdown("""
             background-color: #0066cc !important;
             color: white !important;
         }
-        /* Logo and header styling */
-        [data-testid="stSidebarNav"] {
-            background-image: url("https://your-logo-url.com/logo.png");
-            background-repeat: no-repeat;
-            background-position: 20px 20px;
-            background-size: 150px auto;
-            padding-top: 100px;
-        }
-        .logo-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            padding: 20px;
-            z-index: 999;
-        }
-        .logo-container img {
-            max-width: 150px;
-            height: auto;
-        }
         /* Header styling */
         h1 {
             font-size: 1.8rem !important;
@@ -199,49 +180,53 @@ def format_percentage(value):
 def calculate_benchmarks(df, group_by_column):
     """Calculate benchmark metrics for a given grouping"""
     try:
-        # Get all numeric columns
+        # Create a copy to avoid modifying original data
+        df = df.copy()
+        
+        # Convert percentage strings to floats first
+        for col in df.columns:
+            if df[col].dtype == 'object':  # Only check string columns
+                # Check if column contains percentage values
+                if df[col].astype(str).str.contains('%').any():
+                    df[col] = df[col].apply(lambda x: float(str(x).rstrip('%'))/100 if isinstance(x, str) and '%' in str(x) else x)
+        
+        # Get numeric columns after conversion
         numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
         
         # Initialize metrics dictionary
         metrics = {}
         
-        # Add any column that looks like a metric
-        for col in df.columns:
+        # Add metrics only for numeric columns
+        for col in numeric_cols:
             col_lower = col.lower()
-            # If it's numeric or contains '%', add it
-            if col in numeric_cols or df[col].astype(str).str.contains('%').any():
-                if any(term in col_lower for term in ['impression', 'delivered', 'view']):
-                    metrics[col] = ['mean', 'sum']
-                elif any(term in col_lower for term in ['rate', 'ratio', 'percentage']):
-                    metrics[col] = ['mean']
-                elif any(term in col_lower for term in ['engagement', 'click', 'interaction']):
-                    metrics[col] = ['mean']
-                else:
-                    metrics[col] = ['mean']
+            if any(term in col_lower for term in ['impression', 'delivered', 'view']):
+                metrics[col] = ['mean', 'sum']
+            elif any(term in col_lower for term in ['rate', 'ratio', 'percentage', 'engagement', 'click']):
+                metrics[col] = ['mean']
+            else:
+                metrics[col] = ['mean']
         
         if not metrics:
-            return pd.DataFrame(), ["No numeric or percentage columns found for analysis"]
+            st.warning("No numeric metrics found for analysis")
+            return pd.DataFrame(), []
         
         # Calculate benchmarks
-        benchmarks = df.groupby(group_by_column).agg(metrics).round(4)
+        benchmarks = df.groupby(group_by_column)[list(metrics.keys())].agg(metrics).round(4)
         
         # Flatten column names if we have multi-level columns
         if isinstance(benchmarks.columns, pd.MultiIndex):
             benchmarks.columns = [f"{col[0]}_{col[1]}" for col in benchmarks.columns]
         
-        # Format percentage columns - any column with 'rate', 'ratio', or '%' in name or data
-        percentage_cols = [col for col in benchmarks.columns 
-                         if ('rate' in col.lower() or 'ratio' in col.lower() 
-                             or df[col.split('_')[0]].astype(str).str.contains('%').any())]
-        
+        # Format percentage columns
+        percentage_cols = [col for col in benchmarks.columns if any(term in col.lower() for term in ['rate', 'ratio', 'percentage'])]
         for col in percentage_cols:
-            benchmarks[col] = benchmarks[col].apply(lambda x: format_percentage(x) if pd.notnull(x) else x)
+            benchmarks[col] = benchmarks[col].apply(format_percentage)
         
         return benchmarks, []
         
     except Exception as e:
-        print(f"Error in calculate_benchmarks: {str(e)}")
-        return pd.DataFrame(), [f"Error calculating benchmarks: {str(e)}"]
+        st.error(f"Error calculating benchmarks: {str(e)}")
+        return pd.DataFrame(), [str(e)]
 
 def set_chart_style(fig):
     """Apply consistent styling to all charts"""
@@ -631,8 +616,15 @@ def main():
         
         if uploaded_file is not None:
             try:
-                st.session_state.df = pd.read_csv(uploaded_file)
-                df = st.session_state.df
+                df = pd.read_csv(uploaded_file)
+                st.session_state.df = df
+                
+                # Verify required columns exist
+                required_columns = ['Format', 'Size', 'Placement_Name', 'Vertical']
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                if missing_columns:
+                    st.error(f"Missing required columns: {', '.join(missing_columns)}")
+                    st.stop()
                 
                 st.markdown("---")
                 st.write("### Analysis Options")
@@ -653,7 +645,8 @@ def main():
                                 benchmarks, 'Engagement_Rate', 
                                 selected_category, 'Average Engagement Rate'
                             )
-                            st.plotly_chart(eng_fig, use_container_width=True)
+                            if eng_fig:
+                                st.plotly_chart(eng_fig, use_container_width=True)
                         
                         if 'Click_Rate' in benchmarks.columns:
                             st.subheader("Click Rate Analysis")
@@ -661,7 +654,8 @@ def main():
                                 benchmarks, 'Click_Rate',
                                 selected_category, 'Average Click Rate'
                             )
-                            st.plotly_chart(click_fig, use_container_width=True)
+                            if click_fig:
+                                st.plotly_chart(click_fig, use_container_width=True)
                         
                         st.subheader("Device Performance Analysis")
                         device_pie, device_rates = create_device_visualization(df, selected_category)
@@ -679,43 +673,47 @@ def main():
                 else:
                     st.warning(f"Column {selected_category} not found in the data")
             except Exception as e:
-                st.error("Error processing data. Please check your CSV file format.")
+                st.error(f"Error processing data: {str(e)}")
+                st.stop()
 
     with tab2:
         st.subheader("Creative Analysis")
         
-        # Option to analyze creatives from CSV
-        if st.session_state.df is not None and 'Creative_URL' in st.session_state.df.columns:
-            st.write("Select a creative from your campaign data:")
-            valid_urls = st.session_state.df[
-                st.session_state.df['Creative_URL'].apply(validate_creative_url)
-            ]['Creative_URL'].unique()
-            
-            if len(valid_urls) > 0:
-                selected_creative = st.selectbox(
-                    "Choose a creative to analyze:",
-                    options=[''] + list(valid_urls),
-                    format_func=lambda x: f"Creative {list(valid_urls).index(x) + 1}" if x else "Select a creative..."
-                )
+        if st.session_state.df is not None:
+            if 'Creative_URL' in st.session_state.df.columns:
+                st.write("Select a creative from your campaign data:")
+                valid_urls = st.session_state.df[
+                    st.session_state.df['Creative_URL'].apply(validate_creative_url)
+                ]['Creative_URL'].unique()
                 
-                if selected_creative:
-                    # Get performance data for this creative
-                    creative_data = st.session_state.df[
-                        st.session_state.df['Creative_URL'] == selected_creative
-                    ].iloc[0].to_dict()
-                    display_creative_analysis(selected_creative, creative_data)
+                if len(valid_urls) > 0:
+                    selected_creative = st.selectbox(
+                        "Choose a creative to analyze:",
+                        options=[''] + list(valid_urls),
+                        format_func=lambda x: f"Creative {list(valid_urls).index(x) + 1}" if x else "Select a creative..."
+                    )
+                    
+                    if selected_creative:
+                        try:
+                            creative_data = st.session_state.df[
+                                st.session_state.df['Creative_URL'] == selected_creative
+                            ].iloc[0].to_dict()
+                            display_creative_analysis(selected_creative, creative_data)
+                        except Exception as e:
+                            st.error(f"Error analyzing creative: {str(e)}")
+                else:
+                    st.warning("No valid creative URLs found in the uploaded data.")
             else:
-                st.warning("No valid creative URLs found in the uploaded data.")
+                st.info("Upload a CSV file with a 'Creative_URL' column to analyze creatives.")
         
-        # Option to analyze a single creative
         st.write("Or analyze a single creative:")
         creative_url = st.text_input("Enter creative URL (image, video, or interactive)")
         if creative_url:
             if validate_creative_url(creative_url):
-                display_creative_analysis(
-                    creative_url, 
-                    st.session_state.df.iloc[0].to_dict() if st.session_state.df is not None else None
-                )
+                try:
+                    display_creative_analysis(creative_url)
+                except Exception as e:
+                    st.error(f"Error displaying creative: {str(e)}")
             else:
                 st.error("Please enter a valid creative URL (supported formats: jpg, jpeg, png, gif, mp4, mov)")
 
