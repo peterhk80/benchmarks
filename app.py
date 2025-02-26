@@ -183,44 +183,40 @@ def calculate_benchmarks(df, group_by_column):
         # Create a copy to avoid modifying original data
         df = df.copy()
         
-        # Convert percentage strings to floats first
+        # Function to safely convert to numeric
+        def safe_numeric_convert(x):
+            try:
+                # Remove % if present and convert to float
+                if isinstance(x, str):
+                    x = x.strip('%')
+                return pd.to_numeric(x)
+            except (ValueError, TypeError):
+                return np.nan
+        
+        # Try to convert all columns except the grouping column to numeric
+        numeric_data = {}
         for col in df.columns:
-            if df[col].dtype == 'object':  # Only check string columns
-                # Check if column contains percentage values
-                if df[col].astype(str).str.contains('%').any():
-                    df[col] = df[col].apply(lambda x: float(str(x).rstrip('%'))/100 if isinstance(x, str) and '%' in str(x) else x)
+            if col != group_by_column:
+                converted = df[col].apply(safe_numeric_convert)
+                # Only keep columns where at least 50% of values were successfully converted
+                if converted.notna().mean() >= 0.5:
+                    numeric_data[col] = converted
         
-        # Get numeric columns after conversion
-        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
-        
-        # Initialize metrics dictionary
-        metrics = {}
-        
-        # Add metrics only for numeric columns
-        for col in numeric_cols:
-            col_lower = col.lower()
-            if any(term in col_lower for term in ['impression', 'delivered', 'view']):
-                metrics[col] = ['mean', 'sum']
-            elif any(term in col_lower for term in ['rate', 'ratio', 'percentage', 'engagement', 'click']):
-                metrics[col] = ['mean']
-            else:
-                metrics[col] = ['mean']
-        
-        if not metrics:
+        # If no numeric columns found, return empty
+        if not numeric_data:
             st.warning("No numeric metrics found for analysis")
             return pd.DataFrame(), []
         
+        # Create DataFrame with only numeric columns
+        numeric_df = pd.DataFrame(numeric_data)
+        
         # Calculate benchmarks
-        benchmarks = df.groupby(group_by_column)[list(metrics.keys())].agg(metrics).round(4)
+        benchmarks = numeric_df.groupby(df[group_by_column]).agg('mean').round(4)
         
-        # Flatten column names if we have multi-level columns
-        if isinstance(benchmarks.columns, pd.MultiIndex):
-            benchmarks.columns = [f"{col[0]}_{col[1]}" for col in benchmarks.columns]
-        
-        # Format percentage columns
-        percentage_cols = [col for col in benchmarks.columns if any(term in col.lower() for term in ['rate', 'ratio', 'percentage'])]
-        for col in percentage_cols:
-            benchmarks[col] = benchmarks[col].apply(format_percentage)
+        # Format any columns that look like percentages (values between 0 and 1)
+        for col in benchmarks.columns:
+            if benchmarks[col].between(0, 1).all():
+                benchmarks[col] = benchmarks[col].apply(format_percentage)
         
         return benchmarks, []
         
