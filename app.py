@@ -188,19 +188,31 @@ def calculate_benchmarks(df, group_by_column):
             try:
                 # Remove % if present and convert to float
                 if isinstance(x, str):
-                    x = x.strip('%')
-                return pd.to_numeric(x)
+                    if '%' in x:
+                        return float(x.strip('%')) / 100
+                    # Only try to convert if it looks like a number
+                    elif x.replace('.', '').replace('-', '').isdigit():
+                        return float(x)
+                return x
             except (ValueError, TypeError):
-                return np.nan
+                return x
         
-        # Try to convert all columns except the grouping column to numeric
+        # Identify metric columns (those likely to contain numeric data)
+        metric_columns = [
+            col for col in df.columns 
+            if any(term in col.lower() for term in [
+                'rate', 'impressions', 'clicks', 'engagement', 
+                'views', 'completion', 'delivered'
+            ]) and col != group_by_column
+        ]
+        
+        # Try to convert metric columns to numeric
         numeric_data = {}
-        for col in df.columns:
-            if col != group_by_column:
-                converted = df[col].apply(safe_numeric_convert)
-                # Only keep columns where at least 50% of values were successfully converted
-                if converted.notna().mean() >= 0.5:
-                    numeric_data[col] = converted
+        for col in metric_columns:
+            converted = df[col].apply(safe_numeric_convert)
+            # Check if the column has numeric values
+            if pd.to_numeric(converted, errors='coerce').notna().any():
+                numeric_data[col] = pd.to_numeric(converted, errors='coerce')
         
         # If no numeric columns found, return empty
         if not numeric_data:
@@ -213,9 +225,9 @@ def calculate_benchmarks(df, group_by_column):
         # Calculate benchmarks
         benchmarks = numeric_df.groupby(df[group_by_column]).agg('mean').round(4)
         
-        # Format any columns that look like percentages (values between 0 and 1)
+        # Format percentage columns
         for col in benchmarks.columns:
-            if benchmarks[col].between(0, 1).all():
+            if any(term in col.lower() for term in ['rate', 'ratio', 'percentage']):
                 benchmarks[col] = benchmarks[col].apply(format_percentage)
         
         return benchmarks, []
