@@ -12,6 +12,9 @@ import requests
 from PIL import Image
 from urllib.parse import urlparse
 import re
+import os
+import json
+from datetime import datetime
 
 # Configure Streamlit page
 st.set_page_config(
@@ -160,42 +163,71 @@ def format_percentage(value):
         return str(value)
 
 def calculate_benchmarks(df, group_by_column):
-    """Calculate benchmark metrics for a given grouping"""
-    # Define all possible metrics
-    metrics = {
-        'Delivered_Impressions': ['mean', 'sum', 'count'],
-        'Engagement_Rate': ['mean'],
-        'Click_Rate': ['mean'],
-        'Video_User_Completion_Rate': ['mean'],
-        'Avg_Host_Video_Duration_secs': ['mean']
-    }
+    """Calculate benchmark metrics for a given grouping with flexible column matching"""
     
-    # Filter to only use metrics that exist in the dataframe
-    available_metrics = {}
-    missing_metrics = []
-    for col, aggs in metrics.items():
-        if col in df.columns:
-            available_metrics[col] = aggs
-        else:
-            missing_metrics.append(col)
+    def find_columns(keywords):
+        """Helper to find columns matching any of the given keywords"""
+        return [col for col in df.columns if any(keyword.lower() in col.lower() for keyword in keywords)]
     
-    # If we have no metrics at all, raise an error
-    if not available_metrics:
-        raise ValueError("No valid metrics found in the data")
+    # Find relevant metric columns dynamically
+    impression_cols = find_columns(['impression', 'delivered', 'views'])
+    engagement_cols = find_columns(['engagement', 'interact'])
+    click_cols = find_columns(['click', 'ctr'])
+    video_cols = find_columns(['video', 'completion', 'duration'])
     
-    # Calculate benchmarks with available metrics
-    benchmarks = df.groupby(group_by_column).agg(available_metrics).round(4)
+    # Initialize metrics dictionary with found columns
+    metrics = {}
     
-    # Flatten column names if we have multi-level columns
-    if isinstance(benchmarks.columns, pd.MultiIndex):
-        benchmarks.columns = [f"{col[0]}_{col[1]}" for col in benchmarks.columns]
+    # Add available metrics with appropriate aggregations
+    for col in impression_cols:
+        metrics[col] = ['mean', 'sum', 'count']
     
-    # Format percentage columns if they exist
-    percentage_cols = [col for col in benchmarks.columns if any(x in col for x in ['Rate', 'rate'])]
-    for col in percentage_cols:
-        benchmarks[col] = benchmarks[col].apply(format_percentage)
+    for col in engagement_cols + click_cols:
+        metrics[col] = ['mean']
     
-    return benchmarks, missing_metrics
+    for col in video_cols:
+        if any(x in col.lower() for x in ['rate', 'completion']):
+            metrics[col] = ['mean']
+        elif 'duration' in col.lower():
+            metrics[col] = ['mean', 'median']
+    
+    # If we have no metrics at all, try to use numeric columns as a fallback
+    if not metrics:
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        for col in numeric_cols:
+            metrics[col] = ['mean']
+        
+        if not metrics:
+            return pd.DataFrame(), ["No numeric columns found for analysis"]
+    
+    try:
+        # Calculate benchmarks with available metrics
+        benchmarks = df.groupby(group_by_column).agg(metrics).round(4)
+        
+        # Flatten column names if we have multi-level columns
+        if isinstance(benchmarks.columns, pd.MultiIndex):
+            benchmarks.columns = [f"{col[0]}_{col[1]}" for col in benchmarks.columns]
+        
+        # Format percentage columns
+        percentage_cols = [col for col in benchmarks.columns if any(x in col.lower() for x in ['rate', 'percentage', 'ratio'])]
+        for col in percentage_cols:
+            benchmarks[col] = benchmarks[col].apply(lambda x: format_percentage(x) if pd.notnull(x) else x)
+        
+        # Get list of metrics we couldn't find
+        standard_metrics = {
+            'Delivered_Impressions': impression_cols,
+            'Engagement_Rate': engagement_cols,
+            'Click_Rate': click_cols,
+            'Video_Completion_Rate': [col for col in video_cols if 'completion' in col.lower()]
+        }
+        
+        missing_metrics = [metric for metric, cols in standard_metrics.items() if not cols]
+        
+        return benchmarks, missing_metrics
+        
+    except Exception as e:
+        print(f"Error in calculate_benchmarks: {str(e)}")
+        return pd.DataFrame(), [f"Error calculating benchmarks: {str(e)}"]
 
 def set_chart_style(fig):
     """Apply consistent styling to all charts"""
@@ -557,71 +589,53 @@ def display_creative_analysis(creative_url, performance_data):
         st.write(f"- {rec}")
 
 def validate_csv_structure(df):
-    """Validate CSV file structure"""
+    """Validate CSV structure with more flexible requirements"""
     errors = []
     warnings = []
     
-    # Check for empty dataframe
+    # Check if we have any data
     if df.empty:
-        errors.append("The file is empty. Please upload a file with data.")
+        errors.append("The file contains no data")
         return errors, warnings
     
-    # Just check that we have some data to work with
-    if len(df.columns) == 0:
-        errors.append("The file has no columns. Please check the file format.")
-        return errors, warnings
-        
+    # Look for common metric types
+    has_impressions = any('impression' in col.lower() for col in df.columns)
+    has_engagement = any('engage' in col.lower() for col in df.columns)
+    has_clicks = any('click' in col.lower() for col in df.columns)
+    
+    if not (has_impressions or has_engagement or has_clicks):
+        warnings.append("No standard metric columns (impressions, engagement, clicks) found. Will attempt to use available numeric columns.")
+    
+    # Check for categorical columns
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    if len(categorical_cols) == 0:
+        warnings.append("No categorical columns found for grouping. This may limit analysis options.")
+    
     return errors, warnings
 
 def clean_and_validate_data(df):
-    """Clean and validate the uploaded data"""
+    """Clean and validate data with more flexible handling"""
     try:
         # Make a copy to avoid modifying original
         df = df.copy()
         
-        # Basic cleaning
-        # Remove completely empty rows and columns
-        df = df.dropna(how='all', axis=0)
-        df = df.dropna(how='all', axis=1)
+        # Convert percentage strings to floats
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                # Try to convert percentage strings
+                if df[col].str.contains('%').any():
+                    df[col] = df[col].str.replace('%', '').astype(float) / 100
+                # Try to convert numeric strings
+                elif df[col].str.match(r'^-?\d*\.?\d+$').any():
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Remove leading/trailing whitespace from string columns
-        string_columns = df.select_dtypes(include=['object']).columns
-        for col in string_columns:
-            df[col] = df[col].str.strip()
+        # Remove rows where all numeric columns are NaN
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        if not numeric_cols.empty:
+            df = df.dropna(subset=numeric_cols, how='all')
         
-        # Handle special characters in numeric columns
-        numeric_columns = ['Delivered_Impressions']
-        for col in numeric_columns:
-            if col in df.columns:
-                # Remove commas and other formatting
-                df[col] = df[col].replace({',': '', '$': '', '%': ''}, regex=True)
-                # Convert to numeric, replacing errors with NaN
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Standardize percentage columns
-        percentage_columns = ['Engagement_Rate', 'Click_Rate', 'Video_User_Completion_Rate']
-        for col in percentage_columns:
-            if col in df.columns:
-                df[col] = df[col].apply(lambda x: 
-                    float(str(x).strip('%'))/100 if isinstance(x, str) and '%' in str(x)
-                    else float(x)/100 if isinstance(x, (int, float)) and x > 1
-                    else x
-                )
-        
-        # Standardize text columns
-        text_columns = ['Format', 'Vertical']
-        for col in text_columns:
-            if col in df.columns:
-                # Capitalize first letter of each word
-                df[col] = df[col].str.title()
-                # Remove special characters
-                df[col] = df[col].str.replace(r'[^\w\s]', '', regex=True)
-        
-        # Validate Creative_URL format if present
-        if 'Creative_URL' in df.columns:
-            df['Creative_URL'] = df['Creative_URL'].apply(lambda x: 
-                x if validate_creative_url(x) else None
-            )
+        if df.empty:
+            return None, "No valid data remains after cleaning"
         
         return df, None
         
@@ -672,204 +686,256 @@ def display_data_quality_report(df):
     styled_df = df.head().style.applymap(highlight_nulls)
     st.dataframe(styled_df)
 
+def save_uploaded_file(uploaded_file):
+    """Save uploaded file and return its metadata"""
+    # Create uploads directory if it doesn't exist
+    os.makedirs('uploads', exist_ok=True)
+    
+    # Generate unique filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"{timestamp}_{uploaded_file.name}"
+    file_path = os.path.join('uploads', filename)
+    
+    # Save the file
+    with open(file_path, 'wb') as f:
+        f.write(uploaded_file.getvalue())
+    
+    # Create metadata
+    metadata = {
+        'original_name': uploaded_file.name,
+        'saved_name': filename,
+        'upload_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'file_path': file_path
+    }
+    
+    # Update metadata file
+    metadata_path = 'uploads/metadata.json'
+    all_metadata = {}
+    if os.path.exists(metadata_path):
+        with open(metadata_path, 'r') as f:
+            all_metadata = json.load(f)
+    
+    all_metadata[filename] = metadata
+    
+    with open(metadata_path, 'w') as f:
+        json.dump(all_metadata, f, indent=2)
+    
+    return metadata
+
+def load_saved_files():
+    """Load metadata of all saved files"""
+    metadata_path = 'uploads/metadata.json'
+    if os.path.exists(metadata_path):
+        with open(metadata_path, 'r') as f:
+            return json.load(f)
+    return {}
+
+def load_file_data(file_path):
+    """Load data from saved file"""
+    try:
+        return pd.read_csv(file_path)
+    except Exception as e:
+        st.error(f"Error loading saved file: {str(e)}")
+        return None
+
 def main():
     st.title("Campaign Performance Benchmark Analysis")
     
     # Add tabs for different analyses
     tab1, tab2 = st.tabs(["Performance Metrics", "Creative Analysis"])
     
-    # Store the dataframe in session state
+    # Initialize session state
     if 'df' not in st.session_state:
         st.session_state.df = None
+    if 'current_file' not in st.session_state:
+        st.session_state.current_file = None
     
     with tab1:
-        # Simple file upload section
-        st.write("### Upload Campaign Data")
-        uploaded_file = st.file_uploader("Upload your campaign data CSV file", type=['csv'])
+        st.write("### Campaign Data")
         
-        # Simple help text below with icon
-        with st.expander("📋 View expected CSV format"):
-            st.write("""
-            **Required columns:**
-            - Delivered_Impressions (numeric)
-            - Engagement_Rate (percentage)
-            - Click_Rate (percentage)
-            - Format (text)
-            - Size (text)
-            - Placement_Name (text)
-            - Vertical (text)
+        # File selection/upload section
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Load saved files
+            saved_files = load_saved_files()
+            if saved_files:
+                saved_options = ['Select a saved file...'] + [
+                    f"{meta['original_name']} (uploaded {meta['upload_date']})"
+                    for meta in saved_files.values()
+                ]
+                selected_saved = st.selectbox("Select from saved files:", saved_options)
+                
+                if selected_saved and selected_saved != 'Select a saved file...':
+                    # Find the corresponding metadata
+                    selected_meta = next(
+                        meta for meta in saved_files.values()
+                        if f"{meta['original_name']} (uploaded {meta['upload_date']})" == selected_saved
+                    )
+                    
+                    if selected_meta['file_path'] != st.session_state.current_file:
+                        df = load_file_data(selected_meta['file_path'])
+                        if df is not None:
+                            st.session_state.df = df
+                            st.session_state.current_file = selected_meta['file_path']
+                            st.success(f"✅ Loaded saved file: {selected_meta['original_name']}")
+        
+        with col2:
+            st.write("Or upload a new file:")
+            uploaded_file = st.file_uploader("Upload CSV file", type=['csv'])
             
-            **Optional columns:**
-            - Creative_URL (for creative analysis)
-            - Video metrics (for video performance analysis)
-            - Device metrics (for device performance analysis)
-            """)
-        
-        if uploaded_file is not None:
-            try:
-                # Read the CSV file
+            if uploaded_file is not None:
                 try:
+                    # Read and validate the new file
                     df = pd.read_csv(uploaded_file)
-                except pd.errors.EmptyDataError:
-                    st.error("The uploaded file is empty. Please check the file contents.")
-                    st.stop()
-                except pd.errors.ParserError:
-                    st.error("Unable to parse the CSV file. Please ensure it's a valid CSV format.")
-                    st.stop()
+                    errors, warnings = validate_csv_structure(df)
+                    
+                    if errors:
+                        st.error("Please fix the following errors:")
+                        for error in errors:
+                            st.error(f"- {error}")
+                        st.stop()
+                    
+                    # Clean and validate data
+                    cleaned_df, error = clean_and_validate_data(df)
+                    if error:
+                        st.error(error)
+                        st.stop()
+                    
+                    # Save the file
+                    metadata = save_uploaded_file(uploaded_file)
+                    
+                    # Update session state
+                    st.session_state.df = cleaned_df
+                    st.session_state.current_file = metadata['file_path']
+                    
+                    st.success("✅ File uploaded and saved successfully!")
+                    
+                    # Show non-critical issues
+                    if warnings:
+                        with st.expander("ℹ️ View Data Quality Notes"):
+                            for warning in warnings:
+                                st.info(warning)
+                    
                 except Exception as e:
-                    st.error(f"Error reading the file: {str(e)}")
-                    st.stop()
-                
-                # Validate CSV structure
-                errors, warnings = validate_csv_structure(df)
-                
-                if errors:
-                    st.error("Please fix the following errors in your CSV file:")
-                    for error in errors:
-                        st.error(f"- {error}")
-                    st.stop()
-                
-                # Store non-critical issues
-                data_issues = []
-                if warnings:
-                    data_issues.extend(warnings)
-                
-                # Clean and validate data
-                cleaned_df, error = clean_and_validate_data(df)
-                if error:
-                    st.error(error)
-                    st.stop()
-                
-                df = cleaned_df
-                df = clean_percentage_columns(df)
-                st.session_state.df = df  # Store in session state
-                
-                # Simple success message with scroll instruction
-                st.success("✅ Data loaded successfully! Scroll down to view your benchmark report.")
-                
-                # Show non-critical issues in expandable section if there are any
-                if data_issues:
-                    with st.expander("ℹ️ View Data Quality Notes"):
-                        for issue in data_issues:
-                            st.info(issue)
-                
-                # Main benchmark categories
-                benchmark_categories = ['Format', 'Size', 'Placement_Name', 'Vertical']
-                selected_category = st.selectbox("Select benchmark category:", benchmark_categories)
-                
-                if selected_category in df.columns:
-                    try:
-                        # Calculate and display benchmarks
-                        benchmarks, missing_metrics = calculate_benchmarks(df, selected_category)
-                        
-                        # Show missing metrics in expandable section if there are any
-                        if missing_metrics:
-                            with st.expander("ℹ️ View Missing Metrics"):
-                                st.info("Some metrics are not available in your data:")
-                                for metric in missing_metrics:
-                                    st.write(f"- {metric}")
-                        
-                        st.subheader(f"Benchmark Metrics by {selected_category}")
-                        st.dataframe(benchmarks)
-                        
-                        # Download button for benchmarks
-                        st.markdown(get_download_link(benchmarks, 
-                                                   f'benchmarks_{selected_category}.csv',
-                                                   'Download Benchmark Data'), 
-                                  unsafe_allow_html=True)
-                        
-                        # Engagement Rate visualization
-                        st.subheader("Engagement Rate Analysis")
-                        eng_fig = create_benchmark_visualization(
-                            benchmarks, 'Engagement_Rate', 
-                            selected_category, 'Average Engagement Rate'
-                        )
-                        st.plotly_chart(eng_fig)
-                        st.markdown(get_download_link(eng_fig.to_html(), 
-                                                   f'engagement_rate_{selected_category}.html',
-                                                   'Download Chart'), 
-                                  unsafe_allow_html=True)
-                        
-                        # Click Rate visualization
-                        st.subheader("Click Rate Analysis")
-                        click_fig = create_benchmark_visualization(
-                            benchmarks, 'Click_Rate',
-                            selected_category, 'Average Click Rate'
-                        )
-                        st.plotly_chart(click_fig)
-                        st.markdown(get_download_link(click_fig.to_html(),
-                                                   f'click_rate_{selected_category}.html',
+                    st.error(f"Error processing file: {str(e)}")
+                    st.exception(e)
+        
+        # Only show analysis options if we have data
+        if st.session_state.df is not None:
+            st.markdown("---")
+            st.write("### Analysis Options")
+            
+            # Rest of your existing analysis code...
+            benchmark_categories = ['Format', 'Size', 'Placement_Name', 'Vertical']
+            selected_category = st.selectbox("Select benchmark category:", benchmark_categories)
+            
+            if selected_category in st.session_state.df.columns:
+                try:
+                    # Calculate and display benchmarks
+                    benchmarks, missing_metrics = calculate_benchmarks(st.session_state.df, selected_category)
+                    
+                    # Show missing metrics in expandable section if there are any
+                    if missing_metrics:
+                        with st.expander("ℹ️ View Missing Metrics"):
+                            st.info("Some metrics are not available in your data:")
+                            for metric in missing_metrics:
+                                st.write(f"- {metric}")
+                    
+                    st.subheader(f"Benchmark Metrics by {selected_category}")
+                    st.dataframe(benchmarks)
+                    
+                    # Download button for benchmarks
+                    st.markdown(get_download_link(benchmarks, 
+                                               f'benchmarks_{selected_category}.csv',
+                                               'Download Benchmark Data'), 
+                              unsafe_allow_html=True)
+                    
+                    # Engagement Rate visualization
+                    st.subheader("Engagement Rate Analysis")
+                    eng_fig = create_benchmark_visualization(
+                        benchmarks, 'Engagement_Rate', 
+                        selected_category, 'Average Engagement Rate'
+                    )
+                    st.plotly_chart(eng_fig)
+                    st.markdown(get_download_link(eng_fig.to_html(), 
+                                               f'engagement_rate_{selected_category}.html',
+                                               'Download Chart'), 
+                              unsafe_allow_html=True)
+                    
+                    # Click Rate visualization
+                    st.subheader("Click Rate Analysis")
+                    click_fig = create_benchmark_visualization(
+                        benchmarks, 'Click_Rate',
+                        selected_category, 'Average Click Rate'
+                    )
+                    st.plotly_chart(click_fig)
+                    st.markdown(get_download_link(click_fig.to_html(),
+                                               f'click_rate_{selected_category}.html',
+                                               'Download Chart'),
+                              unsafe_allow_html=True)
+                    
+                    # Video completion analysis
+                    if 'Video_User_Completion_Rate' in st.session_state.df.columns:
+                        st.subheader("Video Performance Analysis")
+                        video_fig = analyze_video_dropoff(st.session_state.df, selected_category)
+                        st.plotly_chart(video_fig)
+                        st.markdown(get_download_link(video_fig.to_html(),
+                                                   f'video_completion_{selected_category}.html',
                                                    'Download Chart'),
                                   unsafe_allow_html=True)
-                        
-                        # Video completion analysis
-                        if 'Video_User_Completion_Rate' in df.columns:
-                            st.subheader("Video Performance Analysis")
-                            video_fig = analyze_video_dropoff(df, selected_category)
-                            st.plotly_chart(video_fig)
-                            st.markdown(get_download_link(video_fig.to_html(),
-                                                       f'video_completion_{selected_category}.html',
-                                                       'Download Chart'),
-                                      unsafe_allow_html=True)
-                        
-                        # Enhanced Device Performance Analysis
-                        st.subheader("Device Performance Analysis")
-                        
-                        # Overall device metrics
-                        device_pie, device_rates = create_device_visualization(df, selected_category)
-                        
-                        # Display device distribution
-                        st.plotly_chart(device_pie)
-                        st.markdown(get_download_link(device_pie.to_html(),
-                                                   'device_distribution.html',
-                                                   'Download Distribution Chart'),
-                                  unsafe_allow_html=True)
-                        
-                        # Display device performance metrics
-                        st.plotly_chart(device_rates)
-                        st.markdown(get_download_link(device_rates.to_html(),
-                                                   'device_performance.html',
-                                                   'Download Performance Chart'),
-                                  unsafe_allow_html=True)
-                        
-                        # Detailed device performance by category
-                        st.write("Detailed Device Performance by Category:")
-                        device_perf = analyze_device_performance(df, selected_category)
-                        st.dataframe(device_perf)
-                        st.markdown(get_download_link(device_perf,
-                                                   f'device_performance_{selected_category}.csv',
-                                                   'Download Detailed Device Data'),
-                                  unsafe_allow_html=True)
-                        
-                        # Additional Insights
-                        st.subheader("Additional Insights")
-                        trends = analyze_trends(df)
-                        
-                        # Device Distribution
-                        st.write("Device Distribution:")
-                        device_dist = pd.DataFrame(trends['device_distribution'].items(), 
-                                                 columns=['Device', 'Percentage'])
-                        device_dist['Percentage'] = device_dist['Percentage'].apply(format_percentage)
-                        st.dataframe(device_dist)
-                        
-                        # Video Performance
-                        if trends['video_metrics']['avg_completion_rate'] > 0:
-                            st.write("Video Performance Metrics:")
-                            st.write(f"- Average Video Completion Rate: {format_percentage(trends['video_metrics']['avg_completion_rate'])}")
-                            st.write(f"- Average Video Duration: {trends['video_metrics']['avg_duration']:.2f} seconds")
-                        
-                    except Exception as e:
-                        st.error(f"Error processing benchmarks: {str(e)}")
-                        st.error("Full error details:")
-                        st.exception(e)
-                
-                else:
-                    st.warning(f"Column {selected_category} not found in the data")
-                
-            except Exception as e:
-                st.error(f"Error processing file: {str(e)}")
-                st.error("Full error details:")
-                st.exception(e)
+                    
+                    # Enhanced Device Performance Analysis
+                    st.subheader("Device Performance Analysis")
+                    
+                    # Overall device metrics
+                    device_pie, device_rates = create_device_visualization(st.session_state.df, selected_category)
+                    
+                    # Display device distribution
+                    st.plotly_chart(device_pie)
+                    st.markdown(get_download_link(device_pie.to_html(),
+                                               'device_distribution.html',
+                                               'Download Distribution Chart'),
+                              unsafe_allow_html=True)
+                    
+                    # Display device performance metrics
+                    st.plotly_chart(device_rates)
+                    st.markdown(get_download_link(device_rates.to_html(),
+                                               'device_performance.html',
+                                               'Download Performance Chart'),
+                              unsafe_allow_html=True)
+                    
+                    # Detailed device performance by category
+                    st.write("Detailed Device Performance by Category:")
+                    device_perf = analyze_device_performance(st.session_state.df, selected_category)
+                    st.dataframe(device_perf)
+                    st.markdown(get_download_link(device_perf,
+                                               f'device_performance_{selected_category}.csv',
+                                               'Download Detailed Device Data'),
+                              unsafe_allow_html=True)
+                    
+                    # Additional Insights
+                    st.subheader("Additional Insights")
+                    trends = analyze_trends(st.session_state.df)
+                    
+                    # Device Distribution
+                    st.write("Device Distribution:")
+                    device_dist = pd.DataFrame(trends['device_distribution'].items(), 
+                                             columns=['Device', 'Percentage'])
+                    device_dist['Percentage'] = device_dist['Percentage'].apply(format_percentage)
+                    st.dataframe(device_dist)
+                    
+                    # Video Performance
+                    if trends['video_metrics']['avg_completion_rate'] > 0:
+                        st.write("Video Performance Metrics:")
+                        st.write(f"- Average Video Completion Rate: {format_percentage(trends['video_metrics']['avg_completion_rate'])}")
+                        st.write(f"- Average Video Duration: {trends['video_metrics']['avg_duration']:.2f} seconds")
+                    
+                except Exception as e:
+                    st.error(f"Error processing benchmarks: {str(e)}")
+                    st.exception(e)
+            else:
+                st.warning(f"Column {selected_category} not found in the data")
 
     with tab2:
         st.subheader("Creative Analysis")
