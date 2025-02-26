@@ -397,226 +397,38 @@ def create_device_visualization(df, group_by_column):
     
     return fig_pie, fig_rates
 
-def clean_percentage_columns(df):
-    """Convert percentage strings to float numbers"""
-    percentage_columns = [
-        'Engagement_Rate', 'Click_Rate', 'Video_User_Completion_Rate',
-        'Video_User_25_Rate', 'Video_User_50_Rate', 'Video_User_75_Rate',
-        'Desktop_Engagement_Rate', 'Desktop_Click_Rate',
-        'Mobile_Engagement_Rate', 'Mobile_Click_Rate',
-        'Tablet_Engagement_Rate', 'Tablet_Click_Rate'
-    ]
-    
-    for col in percentage_columns:
-        if col in df.columns:
-            # Replace '#DIV/0!' with NaN
-            df[col] = df[col].replace('#DIV/0!', np.nan)
-            
-            if df[col].dtype == 'object':  # If column contains strings
-                # Remove % and convert to float, handling NaN values
-                df[col] = pd.to_numeric(df[col].str.rstrip('%'), errors='coerce') / 100.0
-            else:  # If column is already numeric
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                if df[col].max() > 1:  # If percentages are in 0-100 range
-                    df[col] = df[col] / 100.0
-    
-    return df
-
-def validate_creative_url(url):
-    """Validate if the URL is a supported creative format"""
-    if not url or pd.isna(url):
-        return False
-    
-    try:
-        parsed = urlparse(url)
-        return bool(parsed.scheme and parsed.netloc and 
-                   any(url.lower().endswith(ext) for ext in 
-                       ('.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov')))
-    except:
-        return False
-
-def analyze_trends(df):
-    """Analyze trends and patterns in the data"""
-    trends = {}
-    
-    # Performance by device type
-    device_split = {
-        'Desktop': df['Desktop_Delivered_Impressions'].sum(),
-        'Mobile': df['Mobile_Delivered_Impressions'].sum(),
-        'Tablet': df['Tablet_Delivered_Impressions'].sum()
-    }
-    total_impressions = sum(device_split.values())
-    device_split = {k: v/total_impressions for k, v in device_split.items()}
-    
-    # Video engagement analysis
-    video_campaigns = df[df['Video_Starts'].notna()]
-    avg_completion_rate = video_campaigns['Video_User_Completion_Rate'].mean()
-    avg_video_duration = video_campaigns['Avg_Host_Video_Duration_secs'].mean()
-    
-    trends['device_distribution'] = device_split
-    trends['video_metrics'] = {
-        'avg_completion_rate': avg_completion_rate,
-        'avg_duration': avg_video_duration
-    }
-    
-    return trends
-
-def display_creative_analysis(creative_url, performance_data):
-    """Display creative analysis in Streamlit"""
-    st.subheader("Creative Analysis")
-    
-    # Creative preview
-    st.write("Creative Preview:")
-    if creative_url.endswith(('.jpg', '.png', '.jpeg')):
-        try:
-            response = requests.get(creative_url)
-            if response.status_code == 200:
-                image = Image.open(io.BytesIO(response.content))
-                st.image(image, use_column_width=True)
-                
-                # Basic image analysis
-                width, height = image.size
-                st.write("### Image Details")
-                st.write(f"- Dimensions: {width}x{height} pixels")
-                st.write(f"- Aspect ratio: {width/height:.2f}")
-                
-                # Color mode information
-                st.write(f"- Color mode: {image.mode}")
-                
-                if performance_data:
-                    st.write("### Performance Metrics")
-                    metrics = ['Delivered_Impressions', 'Engagement_Rate', 'Click_Rate']
-                    cols = st.columns(len(metrics))
-                    for i, metric in enumerate(metrics):
-                        if metric in performance_data:
-                            value = performance_data[metric]
-                            if metric.endswith('_Rate'):
-                                value = format_percentage(value)
-                            cols[i].metric(metric.replace('_', ' '), value)
-        
-        except Exception as e:
-            st.error(f"Error loading image: {str(e)}")
-            
-    elif creative_url.endswith(('.mp4', '.mov')):
-        st.video(creative_url)
-        
-        if performance_data:
-            # Video metrics
-            video_metrics = ['Video_User_25_Rate', 'Video_User_50_Rate', 
-                           'Video_User_75_Rate', 'Video_User_Completion_Rate']
-            
-            if any(metric in performance_data for metric in video_metrics):
-                st.write("### Video Performance")
-                video_data = {
-                    metric.replace('Video_User_', '').replace('_Rate', ''): 
-                    performance_data.get(metric, 0)
-                    for metric in video_metrics
-                }
-                
-                fig_video = px.line(
-                    x=list(video_data.keys()),
-                    y=list(video_data.values()),
-                    title="Video Completion Rates",
-                    labels={'x': 'Completion Point', 'y': 'Completion Rate'}
-                )
-                fig_video = set_chart_style(fig_video)
-                st.plotly_chart(fig_video, use_container_width=True)
-    else:
-        st.write(f"[View Creative]({creative_url})")
-    
-    # Generate recommendations
-    st.subheader("Creative Recommendations")
-    recommendations = []
-    
-    # Basic recommendations based on format
-    if creative_url.endswith(('.jpg', '.png', '.jpeg')):
-        recommendations.extend([
-            "Ensure key message is clearly visible",
-            "Check contrast for text readability",
-            "Verify branding elements are prominent",
-            "Test different creative dimensions for various placements",
-            "Optimize image file size for faster loading"
-        ])
-    elif creative_url.endswith(('.mp4', '.mov')):
-        recommendations.extend([
-            "Place key messages in first 5 seconds",
-            "Include clear call-to-action",
-            "Optimize for sound-off viewing",
-            "Keep video length under 30 seconds for better completion rates",
-            "Add captions or text overlays for accessibility"
-        ])
-    
-    # Performance-based recommendations
-    if performance_data:
-        eng_rate = performance_data.get('Engagement_Rate', 0)
-        if eng_rate < 0.02:  # 2% benchmark
-            recommendations.append("Consider testing different creative elements to improve engagement")
-        
-        click_rate = performance_data.get('Click_Rate', 0)
-        if click_rate < 0.001:  # 0.1% benchmark
-            recommendations.append("Review call-to-action placement and messaging")
-        
-        # Video-specific recommendations
-        if creative_url.endswith(('.mp4', '.mov')):
-            completion_rate = performance_data.get('Video_User_Completion_Rate', 0)
-            if completion_rate < 0.5:  # 50% benchmark
-                recommendations.append("Consider shortening video length to improve completion rate")
-            
-            if performance_data.get('Video_User_25_Rate', 0) > completion_rate * 2:
-                recommendations.append("High drop-off after first quarter - consider restructuring video content")
-    
-    for rec in recommendations:
-        st.write(f"- {rec}")
-
-def validate_csv_structure(df):
-    """Validate CSV structure with more flexible requirements"""
-    errors = []
-    warnings = []
-    
-    # Check if we have any data
-    if df.empty:
-        errors.append("The file contains no data")
-        return errors, warnings
-    
-    # Look for common metric types
-    has_impressions = any('impression' in col.lower() for col in df.columns)
-    has_engagement = any('engage' in col.lower() for col in df.columns)
-    has_clicks = any('click' in col.lower() for col in df.columns)
-    
-    if not (has_impressions or has_engagement or has_clicks):
-        warnings.append("No standard metric columns (impressions, engagement, clicks) found. Will attempt to use available numeric columns.")
-    
-    # Check for categorical columns
-    categorical_cols = df.select_dtypes(include=['object']).columns
-    if len(categorical_cols) == 0:
-        warnings.append("No categorical columns found for grouping. This may limit analysis options.")
-    
-    return errors, warnings
-
 def clean_and_validate_data(df):
     """Clean and validate the data, ensuring proper formatting for visualization"""
     try:
         # Create a copy to avoid modifying the original
         df = df.copy()
         
-        # Convert percentage strings to floats
-        for col in df.columns:
-            if df[col].dtype == 'object':
-                # Check if column contains percentage values
-                if df[col].astype(str).str.contains('%').any():
-                    df[col] = df[col].str.rstrip('%').astype('float') / 100.0
-        
-        # Ensure required columns exist
-        required_metrics = [
+        # List of columns that should be treated as percentage values
+        percentage_columns = [
             'Engagement_Rate', 'Click_Rate',
             'Desktop_Engagement_Rate', 'Mobile_Engagement_Rate', 'Tablet_Engagement_Rate',
             'Desktop_Click_Rate', 'Mobile_Click_Rate', 'Tablet_Click_Rate',
+            'Video_User_Completion_Rate', 'Video_User_25_Rate', 'Video_User_50_Rate', 'Video_User_75_Rate'
+        ]
+        
+        # Only convert known percentage columns that exist in the dataframe
+        for col in percentage_columns:
+            if col in df.columns and df[col].dtype == 'object':
+                # Replace any '#DIV/0!' with NaN
+                df[col] = df[col].replace('#DIV/0!', np.nan)
+                
+                # Only convert if the column contains % symbol
+                if df[col].astype(str).str.contains('%').any():
+                    df[col] = df[col].str.rstrip('%').astype('float') / 100.0
+        
+        # Ensure required numeric columns are properly formatted
+        numeric_columns = [
             'Desktop_Delivered_Impressions', 'Mobile_Delivered_Impressions', 'Tablet_Delivered_Impressions'
         ]
         
-        missing_cols = [col for col in required_metrics if col not in df.columns]
-        if missing_cols:
-            return df, f"Missing required columns: {', '.join(missing_cols)}"
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         return df, None
         
