@@ -619,15 +619,28 @@ def clean_and_validate_data(df):
         # Make a copy to avoid modifying original
         df = df.copy()
         
-        # Convert percentage strings to floats
+        # First, identify likely numeric columns (those with mostly numbers)
+        def is_numeric_column(series):
+            # Check if more than 50% of non-null values can be converted to numbers
+            non_null = series.dropna()
+            if len(non_null) == 0:
+                return False
+            numeric_count = sum(pd.to_numeric(non_null, errors='coerce').notna())
+            return numeric_count / len(non_null) > 0.5
+
+        # Process each column
         for col in df.columns:
-            if df[col].dtype == 'object':
-                # Try to convert percentage strings
-                if df[col].str.contains('%').any():
-                    df[col] = df[col].str.replace('%', '').astype(float) / 100
-                # Try to convert numeric strings
-                elif df[col].str.match(r'^-?\d*\.?\d+$').any():
+            if df[col].dtype == 'object':  # Only process string columns
+                # Try to detect if it's a percentage column
+                has_percent = df[col].astype(str).str.contains('%').any()
+                
+                # If it's a percentage column
+                if has_percent:
+                    df[col] = df[col].astype(str).str.replace('%', '').astype(float) / 100
+                # If it looks like a numeric column
+                elif is_numeric_column(df[col]):
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Otherwise leave it as is (it's probably text data)
         
         # Remove rows where all numeric columns are NaN
         numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
@@ -781,8 +794,21 @@ def main():
                             st.success(f"✅ Loaded saved file: {selected_meta['original_name']}")
         
         with col2:
-            st.write("Or upload a new file:")
-            uploaded_file = st.file_uploader("Upload CSV file", type=['csv'])
+            st.write("Drag and drop file or select the file:")
+            col2_1, col2_2 = st.columns([4, 1])
+            with col2_1:
+                uploaded_file = st.file_uploader("", type=['csv'])
+            with col2_2:
+                st.markdown("""
+                    <style>
+                    .upload-icon {
+                        font-size: 24px;
+                        color: #0096FF;
+                        margin-top: 22px;
+                    }
+                    </style>
+                    <i class="fas fa-upload upload-icon"></i>
+                    """, unsafe_allow_html=True)
             
             if uploaded_file is not None:
                 try:
