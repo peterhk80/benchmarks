@@ -26,6 +26,30 @@ st.set_page_config(
 # Add custom CSS for logo positioning and header styling
 st.markdown("""
     <style>
+        /* Remove default red from buttons and tabs */
+        .stButton button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0.5rem 1rem;
+        }
+        .stButton button:hover {
+            background-color: #0052a3;
+        }
+        /* Style tabs */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 24px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            color: #0066cc;
+            border-radius: 4px 4px 0 0;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #0066cc !important;
+            color: white !important;
+        }
+        /* Logo and header styling */
         [data-testid="stSidebarNav"] {
             background-image: url("https://your-logo-url.com/logo.png");
             background-repeat: no-repeat;
@@ -44,7 +68,7 @@ st.markdown("""
             max-width: 150px;
             height: auto;
         }
-        /* Custom header styling */
+        /* Header styling */
         h1 {
             font-size: 1.8rem !important;
             font-weight: 500 !important;
@@ -53,7 +77,7 @@ st.markdown("""
         }
         h2 {
             font-size: 1.4rem !important;
-            font-weight: 700 !important;  /* Made section headers bold */
+            font-weight: 700 !important;
             font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
         }
         h3 {
@@ -61,9 +85,19 @@ st.markdown("""
             font-weight: 500 !important;
             font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
         }
-        /* Set default font for all text */
+        /* Set default font */
         .stMarkdown, .stText {
             font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
+        }
+        /* Style selectbox */
+        .stSelectbox [data-baseweb="select"] {
+            border-radius: 4px;
+        }
+        /* Style file uploader */
+        .stFileUploader {
+            border: 2px dashed #0066cc;
+            border-radius: 4px;
+            padding: 1rem;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -543,8 +577,50 @@ def load_file_data(file_path):
         st.error(f"Error loading saved file: {str(e)}")
         return None
 
+def validate_creative_url(url):
+    """Validate if the URL points to a supported creative format"""
+    try:
+        if not url:
+            return False
+            
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+        
+        # Check if URL ends with supported format
+        supported_formats = ['.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov']
+        return any(path.endswith(fmt) for fmt in supported_formats)
+    except:
+        return False
+
+def display_creative_analysis(creative_url, performance_data=None):
+    """Display and analyze creative content"""
+    try:
+        st.write("### Creative Preview")
+        
+        # Get file extension
+        ext = os.path.splitext(urlparse(creative_url).path)[1].lower()
+        
+        # Display based on file type
+        if ext in ['.jpg', '.jpeg', '.png', '.gif']:
+            st.image(creative_url, use_column_width=True)
+        elif ext in ['.mp4', '.mov']:
+            st.video(creative_url)
+            
+        # Display performance metrics if available
+        if performance_data:
+            st.write("### Performance Metrics")
+            metrics_df = pd.DataFrame([performance_data])
+            st.dataframe(metrics_df)
+            
+    except Exception as e:
+        st.error(f"Error displaying creative: {str(e)}")
+
 def main():
     st.title("Campaign Performance Benchmark Analysis")
+    
+    # Initialize session state
+    if 'df' not in st.session_state:
+        st.session_state.df = None
     
     tab1, tab2 = st.tabs(["Performance Metrics", "Creative Analysis"])
     
@@ -555,7 +631,8 @@ def main():
         
         if uploaded_file is not None:
             try:
-                df = pd.read_csv(uploaded_file)
+                st.session_state.df = pd.read_csv(uploaded_file)
+                df = st.session_state.df
                 
                 st.markdown("---")
                 st.write("### Analysis Options")
