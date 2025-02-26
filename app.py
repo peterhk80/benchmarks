@@ -71,7 +71,7 @@ def check_password():
             # Replace these with your desired username/password
             if username == "benchmark" and password == "cnbc2024":
                 st.session_state.password_correct = True
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("😕 Incorrect username or password")
                 return False
