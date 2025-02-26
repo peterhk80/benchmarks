@@ -349,29 +349,79 @@ def analyze_video_dropoff(df, group_by_column):
 
 def analyze_device_performance(df, group_by_column):
     """Analyze performance across devices"""
-    # Basic metrics by device
-    device_metrics = {
-        'Desktop': ['Desktop_Delivered_Impressions', 'Desktop_Engagement_Rate', 'Desktop_Click_Rate'],
-        'Mobile': ['Mobile_Delivered_Impressions', 'Mobile_Engagement_Rate', 'Mobile_Click_Rate'],
-        'Tablet': ['Tablet_Delivered_Impressions', 'Tablet_Engagement_Rate', 'Tablet_Click_Rate']
-    }
-    
-    # Calculate device performance
-    device_performance = df.groupby(group_by_column).agg({
-        metric: 'mean' for device_list in device_metrics.values() for metric in device_list
-    })
-    
-    # Format percentage columns
-    for device in device_metrics:
-        rate_cols = [col for col in device_performance.columns if 'Rate' in col]
-        for col in rate_cols:
-            device_performance[col] = device_performance[col].apply(format_percentage)
-    
-    return device_performance
+    try:
+        # Create a copy to avoid modifying original data
+        df = df.copy()
+        
+        # Function to safely convert to numeric
+        def safe_numeric_convert(x):
+            try:
+                if isinstance(x, str):
+                    if '%' in x:
+                        return float(x.strip('%')) / 100
+                    elif x.replace('.', '').replace('-', '').isdigit():
+                        return float(x)
+                return x
+            except (ValueError, TypeError):
+                return np.nan
+        
+        # Basic metrics by device
+        device_metrics = {
+            'Desktop': ['Desktop_Delivered_Impressions', 'Desktop_Engagement_Rate', 'Desktop_Click_Rate'],
+            'Mobile': ['Mobile_Delivered_Impressions', 'Mobile_Engagement_Rate', 'Mobile_Click_Rate'],
+            'Tablet': ['Tablet_Delivered_Impressions', 'Tablet_Engagement_Rate', 'Tablet_Click_Rate']
+        }
+        
+        # Convert metrics to numeric before aggregation
+        numeric_df = df.copy()
+        for device_list in device_metrics.values():
+            for metric in device_list:
+                if metric in df.columns:
+                    numeric_df[metric] = df[metric].apply(safe_numeric_convert)
+        
+        # Calculate device performance using numeric data
+        agg_dict = {}
+        for device_list in device_metrics.values():
+            for metric in device_list:
+                if metric in numeric_df.columns:
+                    # Only include columns that have some numeric values
+                    if pd.to_numeric(numeric_df[metric], errors='coerce').notna().any():
+                        agg_dict[metric] = 'mean'
+        
+        if not agg_dict:
+            return pd.DataFrame()
+            
+        device_performance = numeric_df.groupby(group_by_column).agg(agg_dict).round(4)
+        
+        # Format percentage columns
+        for col in device_performance.columns:
+            if 'Rate' in col:
+                device_performance[col] = device_performance[col].apply(format_percentage)
+        
+        return device_performance
+        
+    except Exception as e:
+        print(f"Error in device performance analysis: {str(e)}")
+        return pd.DataFrame()
 
 def create_device_visualization(df, group_by_column):
     """Create visualization for device performance"""
     try:
+        # Create a copy to avoid modifying original data
+        df = df.copy()
+        
+        # Function to safely convert to numeric
+        def safe_numeric_convert(x):
+            try:
+                if isinstance(x, str):
+                    if '%' in x:
+                        return float(x.strip('%')) / 100
+                    elif x.replace('.', '').replace('-', '').isdigit():
+                        return float(x)
+                return x
+            except (ValueError, TypeError):
+                return np.nan
+        
         # Check which device columns exist
         device_cols = {
             'Desktop': 'Desktop_Delivered_Impressions',
@@ -385,9 +435,14 @@ def create_device_visualization(df, group_by_column):
             print("No device impression columns found")
             return None, None
             
+        # Convert impression columns to numeric
+        numeric_df = df.copy()
+        for col in available_devices.values():
+            numeric_df[col] = df[col].apply(safe_numeric_convert)
+            
         # Create device data only for available columns
         device_data = {
-            device: df[col].sum() 
+            device: pd.to_numeric(numeric_df[col], errors='coerce').sum()
             for device, col in available_devices.items()
         }
         
@@ -399,7 +454,7 @@ def create_device_visualization(df, group_by_column):
         )
         fig_pie = set_chart_style(fig_pie)
         
-        # Get available rate columns
+        # Get available rate columns and convert to numeric
         device_rates = []
         for device in available_devices.keys():
             eng_rate = f'{device}_Engagement_Rate'
@@ -408,9 +463,11 @@ def create_device_visualization(df, group_by_column):
             if eng_rate in df.columns or click_rate in df.columns:
                 rates = {'Device': device}
                 if eng_rate in df.columns:
-                    rates['Engagement Rate'] = df[eng_rate].mean()
+                    numeric_df[eng_rate] = df[eng_rate].apply(safe_numeric_convert)
+                    rates['Engagement Rate'] = pd.to_numeric(numeric_df[eng_rate], errors='coerce').mean()
                 if click_rate in df.columns:
-                    rates['Click Rate'] = df[click_rate].mean()
+                    numeric_df[click_rate] = df[click_rate].apply(safe_numeric_convert)
+                    rates['Click Rate'] = pd.to_numeric(numeric_df[click_rate], errors='coerce').mean()
                 device_rates.append(rates)
         
         if not device_rates:
@@ -428,6 +485,8 @@ def create_device_visualization(df, group_by_column):
                 name='Engagement Rate',
                 y=rates_df['Device'],
                 x=rates_df['Engagement Rate'],
+                text=[format_percentage(x) for x in rates_df['Engagement Rate']],
+                textposition='outside',
                 orientation='h'
             ))
             
@@ -436,6 +495,8 @@ def create_device_visualization(df, group_by_column):
                 name='Click Rate',
                 y=rates_df['Device'],
                 x=rates_df['Click Rate'],
+                text=[format_percentage(x) for x in rates_df['Click Rate']],
+                textposition='outside',
                 orientation='h'
             ))
         
