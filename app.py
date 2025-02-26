@@ -523,12 +523,10 @@ def validate_csv_structure(df):
         },
         'Format': {
             'type': 'string',
-            'allowed_values': ['Display', 'Video', 'Native', 'Social'],
             'allow_null': False
         },
         'Size': {
             'type': 'string',
-            'pattern': r'^\d+x\d+$',  # e.g., "300x250"
             'allow_null': False
         },
         'Placement_Name': {
@@ -538,7 +536,6 @@ def validate_csv_structure(df):
         },
         'Vertical': {
             'type': 'string',
-            'allowed_values': ['Retail', 'Auto', 'Finance', 'Tech', 'CPG', 'Other'],
             'allow_null': False
         }
     }
@@ -592,22 +589,6 @@ def validate_csv_structure(df):
                     errors.append(f"Column '{col}' contains invalid percentage values")
             
             elif rules['type'] == 'string':
-                if 'allowed_values' in rules:
-                    invalid_values = non_null_values[~non_null_values.isin(rules['allowed_values'])]
-                    if not invalid_values.empty:
-                        errors.append(
-                            f"Column '{col}' contains invalid values: {', '.join(invalid_values.unique())}. "
-                            f"Allowed values are: {', '.join(rules['allowed_values'])}"
-                        )
-                
-                if 'pattern' in rules:
-                    invalid_format = non_null_values[~non_null_values.str.match(rules['pattern'])]
-                    if not invalid_format.empty:
-                        errors.append(
-                            f"Column '{col}' contains invalid format values: {', '.join(invalid_format.unique())}. "
-                            f"Should match pattern: {rules['pattern']}"
-                        )
-                
                 if 'min_length' in rules:
                     short_values = non_null_values[non_null_values.str.len() < rules['min_length']]
                     if not short_values.empty:
