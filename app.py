@@ -10,8 +10,6 @@ import io
 import base64
 import requests
 from PIL import Image
-import cv2
-import numpy as np
 from urllib.parse import urlparse
 import re
 
@@ -396,96 +394,6 @@ def analyze_trends(df):
     
     return trends
 
-# Add these new functions for creative analysis
-
-def analyze_creative_colors(image):
-    """Analyze color palette and distribution in creative"""
-    # Convert image to RGB colors
-    pixels = np.float32(image).reshape(-1, 3)
-    
-    # Use k-means to find dominant colors
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, .1)
-    flags = cv2.KMEANS_RANDOM_CENTERS
-    _, labels, palette = cv2.kmeans(pixels, 5, None, criteria, 10, flags)
-    
-    # Calculate color distribution
-    _, counts = np.unique(labels, return_counts=True)
-    
-    return palette.tolist(), (counts / counts.sum()).tolist()
-
-def analyze_creative_layout(image):
-    """Analyze layout and element positioning"""
-    # Get image dimensions
-    height, width = image.shape[:2]
-    
-    # Detect edges for layout analysis
-    edges = cv2.Canny(image, 100, 200)
-    
-    # Analyze different regions (top, middle, bottom)
-    regions = {
-        'top': edges[:height//3, :].sum() / (width * height/3),
-        'middle': edges[height//3:2*height//3, :].sum() / (width * height/3),
-        'bottom': edges[2*height//3:, :].sum() / (width * height/3)
-    }
-    
-    return regions
-
-def analyze_video_metrics(video_data, performance_metrics):
-    """Analyze video creative performance"""
-    video_insights = {
-        'engagement_points': [],
-        'dropoff_analysis': {},
-        'optimal_duration': None
-    }
-    
-    # Analyze completion rates at different points
-    if 'Video_User_25_Rate' in performance_metrics:
-        video_insights['dropoff_analysis']['25%'] = performance_metrics['Video_User_25_Rate']
-        video_insights['dropoff_analysis']['50%'] = performance_metrics['Video_User_50_Rate']
-        video_insights['dropoff_analysis']['75%'] = performance_metrics['Video_User_75_Rate']
-        video_insights['dropoff_analysis']['100%'] = performance_metrics['Video_User_Completion_Rate']
-    
-    return video_insights
-
-def generate_creative_recommendations(creative_analysis, performance_metrics):
-    """Generate recommendations based on creative and performance analysis"""
-    recommendations = []
-    
-    # Color recommendations
-    if 'color_palette' in creative_analysis:
-        recommendations.append({
-            'category': 'Colors',
-            'insights': 'Analysis of color impact on engagement',
-            'recommendations': [
-                'Consider contrast ratio for better visibility',
-                'Test different color combinations for CTAs'
-            ]
-        })
-    
-    # Layout recommendations
-    if 'layout' in creative_analysis:
-        recommendations.append({
-            'category': 'Layout',
-            'insights': 'Analysis of element positioning',
-            'recommendations': [
-                'Position key messages in high-attention areas',
-                'Optimize CTA placement based on engagement zones'
-            ]
-        })
-    
-    # Video recommendations
-    if 'video_metrics' in creative_analysis:
-        recommendations.append({
-            'category': 'Video',
-            'insights': 'Analysis of video engagement patterns',
-            'recommendations': [
-                'Optimize video length based on completion rates',
-                'Place key messages before major dropoff points'
-            ]
-        })
-    
-    return recommendations
-
 def display_creative_analysis(creative_url, performance_data):
     """Display creative analysis in Streamlit"""
     st.subheader("Creative Analysis")
@@ -493,78 +401,105 @@ def display_creative_analysis(creative_url, performance_data):
     # Creative preview
     st.write("Creative Preview:")
     if creative_url.endswith(('.jpg', '.png', '.jpeg')):
-        st.image(creative_url, use_column_width=True)
+        try:
+            response = requests.get(creative_url)
+            if response.status_code == 200:
+                image = Image.open(io.BytesIO(response.content))
+                st.image(image, use_column_width=True)
+                
+                # Basic image analysis
+                width, height = image.size
+                st.write("### Image Details")
+                st.write(f"- Dimensions: {width}x{height} pixels")
+                st.write(f"- Aspect ratio: {width/height:.2f}")
+                
+                # Color mode information
+                st.write(f"- Color mode: {image.mode}")
+                
+                if performance_data:
+                    st.write("### Performance Metrics")
+                    metrics = ['Delivered_Impressions', 'Engagement_Rate', 'Click_Rate']
+                    cols = st.columns(len(metrics))
+                    for i, metric in enumerate(metrics):
+                        if metric in performance_data:
+                            value = performance_data[metric]
+                            if metric.endswith('_Rate'):
+                                value = format_percentage(value)
+                            cols[i].metric(metric.replace('_', ' '), value)
+        
+        except Exception as e:
+            st.error(f"Error loading image: {str(e)}")
+            
     elif creative_url.endswith(('.mp4', '.mov')):
         st.video(creative_url)
+        
+        if performance_data:
+            # Video metrics
+            video_metrics = ['Video_User_25_Rate', 'Video_User_50_Rate', 
+                           'Video_User_75_Rate', 'Video_User_Completion_Rate']
+            
+            if any(metric in performance_data for metric in video_metrics):
+                st.write("### Video Performance")
+                video_data = {
+                    metric.replace('Video_User_', '').replace('_Rate', ''): 
+                    performance_data.get(metric, 0)
+                    for metric in video_metrics
+                }
+                
+                fig_video = px.line(
+                    x=list(video_data.keys()),
+                    y=list(video_data.values()),
+                    title="Video Completion Rates",
+                    labels={'x': 'Completion Point', 'y': 'Completion Rate'}
+                )
+                fig_video = set_chart_style(fig_video)
+                st.plotly_chart(fig_video, use_container_width=True)
     else:
         st.write(f"[View Creative]({creative_url})")
     
-    # Analyze creative
-    try:
-        response = requests.get(creative_url)
-        if response.status_code == 200:
-            if creative_url.endswith(('.jpg', '.png', '.jpeg')):
-                # Image analysis
-                image = Image.open(io.BytesIO(response.content))
-                image_np = np.array(image)
-                
-                # Color analysis
-                palette, distribution = analyze_creative_colors(image_np)
-                
-                # Layout analysis
-                layout_metrics = analyze_creative_layout(image_np)
-                
-                st.write("Color Analysis:")
-                fig_colors = px.pie(
-                    values=distribution,
-                    names=[f"Color {i+1}" for i in range(len(palette))],
-                    title="Color Distribution"
-                )
-                fig_colors = set_chart_style(fig_colors)
-                fig_colors.update_traces(textfont=dict(size=14))
-                st.plotly_chart(fig_colors, use_container_width=True)
-                
-                st.write("Layout Analysis:")
-                fig_layout = px.bar(
-                    x=list(layout_metrics.keys()),
-                    y=list(layout_metrics.values()),
-                    title="Element Distribution by Region"
-                )
-                fig_layout = set_chart_style(fig_layout)
-                fig_layout.update_traces(textfont=dict(size=14))
-                st.plotly_chart(fig_layout, use_container_width=True)
-            
-            elif creative_url.endswith(('.mp4', '.mov')):
-                # Video analysis
-                video_insights = analyze_video_metrics(response.content, performance_data)
-                
-                st.write("Video Performance:")
-                if video_insights['dropoff_analysis']:
-                    fig_dropoff = px.line(
-                        x=list(video_insights['dropoff_analysis'].keys()),
-                        y=list(video_insights['dropoff_analysis'].values()),
-                        title="Video Completion Rate by Quarter"
-                    )
-                    fig_dropoff = set_chart_style(fig_dropoff)
-                    st.plotly_chart(fig_dropoff, use_container_width=True)
-    
-    except Exception as e:
-        st.error(f"Error analyzing creative: {str(e)}")
-        return
-    
-    # Generate and display recommendations
+    # Generate recommendations
     st.subheader("Creative Recommendations")
-    recommendations = generate_creative_recommendations({
-        'color_palette': palette if 'palette' in locals() else None,
-        'layout': layout_metrics if 'layout_metrics' in locals() else None,
-        'video_metrics': video_insights if 'video_insights' in locals() else None
-    }, performance_data)
+    recommendations = []
+    
+    # Basic recommendations based on format
+    if creative_url.endswith(('.jpg', '.png', '.jpeg')):
+        recommendations.extend([
+            "Ensure key message is clearly visible",
+            "Check contrast for text readability",
+            "Verify branding elements are prominent",
+            "Test different creative dimensions for various placements",
+            "Optimize image file size for faster loading"
+        ])
+    elif creative_url.endswith(('.mp4', '.mov')):
+        recommendations.extend([
+            "Place key messages in first 5 seconds",
+            "Include clear call-to-action",
+            "Optimize for sound-off viewing",
+            "Keep video length under 30 seconds for better completion rates",
+            "Add captions or text overlays for accessibility"
+        ])
+    
+    # Performance-based recommendations
+    if performance_data:
+        eng_rate = performance_data.get('Engagement_Rate', 0)
+        if eng_rate < 0.02:  # 2% benchmark
+            recommendations.append("Consider testing different creative elements to improve engagement")
+        
+        click_rate = performance_data.get('Click_Rate', 0)
+        if click_rate < 0.001:  # 0.1% benchmark
+            recommendations.append("Review call-to-action placement and messaging")
+        
+        # Video-specific recommendations
+        if creative_url.endswith(('.mp4', '.mov')):
+            completion_rate = performance_data.get('Video_User_Completion_Rate', 0)
+            if completion_rate < 0.5:  # 50% benchmark
+                recommendations.append("Consider shortening video length to improve completion rate")
+            
+            if performance_data.get('Video_User_25_Rate', 0) > completion_rate * 2:
+                recommendations.append("High drop-off after first quarter - consider restructuring video content")
     
     for rec in recommendations:
-        st.write(f"**{rec['category']}**")
-        st.write(rec['insights'])
-        for r in rec['recommendations']:
-            st.write(f"- {r}")
+        st.write(f"- {rec}")
 
 def validate_csv_structure(df):
     """Validate CSV file structure and required columns"""
