@@ -254,34 +254,33 @@ def set_chart_style(fig):
 
 def create_benchmark_visualization(df, metric, group_by_column, title):
     """Create horizontal bar chart for benchmark metrics"""
-    # Handle aggregated column names
-    metric_col = f"{metric}_mean" if f"{metric}_mean" in df.columns else metric
-    
     fig = px.bar(df, 
-                 y=df.index,  # Swap x and y for horizontal bars
-                 x=metric_col,
+                 y=df.index,
+                 x=metric,
                  title=f'{title} by {group_by_column}',
-                 labels={metric_col: metric.replace('_', ' ')},
-                 text=df[metric_col],
-                 orientation='h')  # Set horizontal orientation
+                 labels={metric: metric.replace('_', ' ')},
+                 text=df[metric],
+                 orientation='h')
     
     fig.update_traces(
         texttemplate='%{text}', 
         textposition='outside',
-        textfont=dict(
-            size=16,
-            family="Helvetica Neue Light, Helvetica, Arial, sans-serif"
-        )
+        textfont=dict(size=16)
     )
     
-    # Update layout for better label readability
     fig.update_layout(
-        yaxis={'categoryorder': 'total ascending'},  # Sort bars
+        yaxis={'categoryorder': 'total ascending'},
         xaxis_title=metric.replace('_', ' '),
-        yaxis_title=group_by_column
+        yaxis_title=group_by_column,
+        font=dict(
+            family="Helvetica Neue Light, Helvetica, Arial, sans-serif",
+            size=16
+        ),
+        width=1200,
+        height=600
     )
     
-    return set_chart_style(fig)
+    return fig
 
 def analyze_video_dropoff(df, group_by_column):
     """Analyze video completion rates at different stages"""
@@ -348,8 +347,6 @@ def create_device_visualization(df, group_by_column):
         names=list(device_data.keys()),
         title='Impression Distribution by Device'
     )
-    fig_pie = set_chart_style(fig_pie)
-    fig_pie.update_traces(textfont=dict(size=14))
     
     # Create horizontal bar chart for engagement rates
     device_rates = pd.DataFrame({
@@ -369,31 +366,30 @@ def create_device_visualization(df, group_by_column):
     fig_rates = go.Figure()
     fig_rates.add_trace(go.Bar(
         name='Engagement Rate',
-        y=device_rates['Device'],  # Swap x and y for horizontal bars
+        y=device_rates['Device'],
         x=device_rates['Engagement Rate'],
-        text=[format_percentage(v) for v in device_rates['Engagement Rate']],
-        textposition='outside',
-        textfont=dict(size=14),
-        orientation='h'  # Set horizontal orientation
+        orientation='h'
     ))
     fig_rates.add_trace(go.Bar(
         name='Click Rate',
-        y=device_rates['Device'],  # Swap x and y for horizontal bars
+        y=device_rates['Device'],
         x=device_rates['Click Rate'],
-        text=[format_percentage(v) for v in device_rates['Click Rate']],
-        textposition='outside',
-        textfont=dict(size=14),
-        orientation='h'  # Set horizontal orientation
+        orientation='h'
     ))
     
     fig_rates.update_layout(
         title='Performance Metrics by Device',
         barmode='group',
-        yaxis={'categoryorder': 'total ascending'},  # Sort bars
+        yaxis={'categoryorder': 'total ascending'},
         xaxis_title='Rate',
-        yaxis_title='Device'
+        yaxis_title='Device',
+        font=dict(
+            family="Helvetica Neue Light, Helvetica, Arial, sans-serif",
+            size=16
+        ),
+        width=1200,
+        height=600
     )
-    fig_rates = set_chart_style(fig_rates)
     
     return fig_pie, fig_rates
 
@@ -403,37 +399,19 @@ def clean_and_validate_data(df):
         # Create a copy to avoid modifying the original
         df = df.copy()
         
-        # List of columns that should be treated as percentage values
-        percentage_columns = [
-            'Engagement_Rate', 'Click_Rate',
-            'Desktop_Engagement_Rate', 'Mobile_Engagement_Rate', 'Tablet_Engagement_Rate',
-            'Desktop_Click_Rate', 'Mobile_Click_Rate', 'Tablet_Click_Rate',
-            'Video_User_Completion_Rate', 'Video_User_25_Rate', 'Video_User_50_Rate', 'Video_User_75_Rate'
-        ]
-        
-        # Only convert known percentage columns that exist in the dataframe
-        for col in percentage_columns:
-            if col in df.columns and df[col].dtype == 'object':
-                # Replace any '#DIV/0!' with NaN
-                df[col] = df[col].replace('#DIV/0!', np.nan)
-                
-                # Only convert if the column contains % symbol
-                if df[col].astype(str).str.contains('%').any():
-                    df[col] = df[col].str.rstrip('%').astype('float') / 100.0
-        
-        # Ensure required numeric columns are properly formatted
-        numeric_columns = [
-            'Desktop_Delivered_Impressions', 'Mobile_Delivered_Impressions', 'Tablet_Delivered_Impressions'
-        ]
-        
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+        # Only convert percentage columns that contain % symbol
+        for col in df.columns:
+            if df[col].dtype == 'object':  # Only check string columns
+                sample_values = df[col].dropna().head()
+                if any('%' in str(x) for x in sample_values):
+                    df[col] = df[col].apply(lambda x: float(str(x).rstrip('%'))/100 if isinstance(x, str) and '%' in str(x) else x)
         
         return df, None
         
     except Exception as e:
-        return None, f"Error cleaning data: {str(e)}"
+        # If anything fails, return original dataframe
+        print(f"Warning in data cleaning: {str(e)}")
+        return df, None
 
 def display_data_quality_report(df):
     """Display a comprehensive data quality report"""
@@ -606,8 +584,9 @@ def main():
                             # Device Performance Analysis
                             st.subheader("Device Performance Analysis")
                             device_pie, device_rates = create_device_visualization(cleaned_df, selected_category)
-                            st.plotly_chart(device_pie, use_container_width=True)
-                            st.plotly_chart(device_rates, use_container_width=True)
+                            if device_pie and device_rates:
+                                st.plotly_chart(device_pie, use_container_width=True)
+                                st.plotly_chart(device_rates, use_container_width=True)
                             
                             # Detailed device performance
                             st.write("Detailed Device Performance:")
