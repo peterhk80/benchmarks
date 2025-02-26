@@ -40,15 +40,31 @@ st.markdown("""
         
         /* Tab styling */
         .stTabs [data-baseweb="tab-list"] {
-            gap: 24px;
+            gap: 32px;  /* Increased gap between tabs */
+            border-bottom: none !important;  /* Remove bottom border */
         }
         .stTabs [data-baseweb="tab"] {
             color: #2E8B57;  /* Sea Green */
             border-radius: 4px 4px 0 0;
+            min-width: 200px;  /* Minimum width for tabs */
+            padding: 10px 20px;  /* More padding */
+            margin-bottom: -2px;  /* Hide bottom border */
+            border: 2px solid transparent;  /* Transparent border by default */
         }
         .stTabs [aria-selected="true"] {
             background-color: #2E8B57 !important;  /* Sea Green */
             color: white !important;
+            border-color: #2E8B57 !important;  /* Match background color */
+            border-bottom: none !important;  /* Remove bottom border */
+        }
+        .stTabs [data-baseweb="tab-border"] {
+            display: none !important;  /* Hide the red border */
+        }
+        .stTabs [data-baseweb="tab-highlight"] {
+            background-color: transparent !important;  /* Remove highlight */
+        }
+        .stTabs [data-baseweb="tab-list"] button:focus {
+            box-shadow: none !important;  /* Remove focus outline */
         }
         
         /* Header styling */
