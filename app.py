@@ -254,33 +254,43 @@ def set_chart_style(fig):
 
 def create_benchmark_visualization(df, metric, group_by_column, title):
     """Create horizontal bar chart for benchmark metrics"""
-    fig = px.bar(df, 
-                 y=df.index,
-                 x=metric,
-                 title=f'{title} by {group_by_column}',
-                 labels={metric: metric.replace('_', ' ')},
-                 text=df[metric],
-                 orientation='h')
-    
-    fig.update_traces(
-        texttemplate='%{text}', 
-        textposition='outside',
-        textfont=dict(size=16)
-    )
-    
-    fig.update_layout(
-        yaxis={'categoryorder': 'total ascending'},
-        xaxis_title=metric.replace('_', ' '),
-        yaxis_title=group_by_column,
-        font=dict(
-            family="Helvetica Neue Light, Helvetica, Arial, sans-serif",
-            size=16
-        ),
-        width=1200,
-        height=600
-    )
-    
-    return fig
+    try:
+        # Check if metric exists in dataframe
+        if metric not in df.columns:
+            print(f"Warning: {metric} not found in data")
+            return None
+            
+        # Create the visualization
+        fig = px.bar(df, 
+                    y=df.index,
+                    x=metric,
+                    title=f'{title} by {group_by_column}',
+                    labels={metric: metric.replace('_', ' ')},
+                    text=df[metric],
+                    orientation='h')
+        
+        fig.update_traces(
+            texttemplate='%{text}', 
+            textposition='outside',
+            textfont=dict(size=16)
+        )
+        
+        fig.update_layout(
+            yaxis={'categoryorder': 'total ascending'},
+            xaxis_title=metric.replace('_', ' '),
+            yaxis_title=group_by_column,
+            font=dict(
+                family="Helvetica Neue Light, Helvetica, Arial, sans-serif",
+                size=16
+            ),
+            width=1200,
+            height=600
+        )
+        
+        return fig
+    except Exception as e:
+        print(f"Error creating visualization: {str(e)}")
+        return None
 
 def analyze_video_dropoff(df, group_by_column):
     """Analyze video completion rates at different stages"""
@@ -334,64 +344,88 @@ def analyze_device_performance(df, group_by_column):
 
 def create_device_visualization(df, group_by_column):
     """Create visualization for device performance"""
-    # Prepare data for visualization
-    device_data = {
-        'Desktop': df['Desktop_Delivered_Impressions'].sum(),
-        'Mobile': df['Mobile_Delivered_Impressions'].sum(),
-        'Tablet': df['Tablet_Delivered_Impressions'].sum()
-    }
-    
-    # Create pie chart for impression distribution
-    fig_pie = px.pie(
-        values=list(device_data.values()),
-        names=list(device_data.keys()),
-        title='Impression Distribution by Device'
-    )
-    
-    # Create horizontal bar chart for engagement rates
-    device_rates = pd.DataFrame({
-        'Device': ['Desktop', 'Mobile', 'Tablet'],
-        'Engagement Rate': [
-            df['Desktop_Engagement_Rate'].mean(),
-            df['Mobile_Engagement_Rate'].mean(),
-            df['Tablet_Engagement_Rate'].mean()
-        ],
-        'Click Rate': [
-            df['Desktop_Click_Rate'].mean(),
-            df['Mobile_Click_Rate'].mean(),
-            df['Tablet_Click_Rate'].mean()
-        ]
-    })
-    
-    fig_rates = go.Figure()
-    fig_rates.add_trace(go.Bar(
-        name='Engagement Rate',
-        y=device_rates['Device'],
-        x=device_rates['Engagement Rate'],
-        orientation='h'
-    ))
-    fig_rates.add_trace(go.Bar(
-        name='Click Rate',
-        y=device_rates['Device'],
-        x=device_rates['Click Rate'],
-        orientation='h'
-    ))
-    
-    fig_rates.update_layout(
-        title='Performance Metrics by Device',
-        barmode='group',
-        yaxis={'categoryorder': 'total ascending'},
-        xaxis_title='Rate',
-        yaxis_title='Device',
-        font=dict(
-            family="Helvetica Neue Light, Helvetica, Arial, sans-serif",
-            size=16
-        ),
-        width=1200,
-        height=600
-    )
-    
-    return fig_pie, fig_rates
+    try:
+        # Check which device columns exist
+        device_cols = {
+            'Desktop': 'Desktop_Delivered_Impressions',
+            'Mobile': 'Mobile_Delivered_Impressions',
+            'Tablet': 'Tablet_Delivered_Impressions'
+        }
+        
+        available_devices = {k: v for k, v in device_cols.items() if v in df.columns}
+        
+        if not available_devices:
+            print("No device impression columns found")
+            return None, None
+            
+        # Create device data only for available columns
+        device_data = {
+            device: df[col].sum() 
+            for device, col in available_devices.items()
+        }
+        
+        # Create pie chart
+        fig_pie = px.pie(
+            values=list(device_data.values()),
+            names=list(device_data.keys()),
+            title='Impression Distribution by Device'
+        )
+        fig_pie = set_chart_style(fig_pie)
+        
+        # Get available rate columns
+        device_rates = []
+        for device in available_devices.keys():
+            eng_rate = f'{device}_Engagement_Rate'
+            click_rate = f'{device}_Click_Rate'
+            
+            if eng_rate in df.columns or click_rate in df.columns:
+                rates = {'Device': device}
+                if eng_rate in df.columns:
+                    rates['Engagement Rate'] = df[eng_rate].mean()
+                if click_rate in df.columns:
+                    rates['Click Rate'] = df[click_rate].mean()
+                device_rates.append(rates)
+        
+        if not device_rates:
+            print("No rate columns found")
+            return fig_pie, None
+            
+        # Create rates dataframe
+        rates_df = pd.DataFrame(device_rates)
+        
+        # Create rates chart
+        fig_rates = go.Figure()
+        
+        if 'Engagement Rate' in rates_df.columns:
+            fig_rates.add_trace(go.Bar(
+                name='Engagement Rate',
+                y=rates_df['Device'],
+                x=rates_df['Engagement Rate'],
+                orientation='h'
+            ))
+            
+        if 'Click Rate' in rates_df.columns:
+            fig_rates.add_trace(go.Bar(
+                name='Click Rate',
+                y=rates_df['Device'],
+                x=rates_df['Click Rate'],
+                orientation='h'
+            ))
+        
+        fig_rates.update_layout(
+            title='Performance Metrics by Device',
+            barmode='group',
+            yaxis={'categoryorder': 'total ascending'},
+            xaxis_title='Rate',
+            yaxis_title='Device'
+        )
+        fig_rates = set_chart_style(fig_rates)
+        
+        return fig_pie, fig_rates
+        
+    except Exception as e:
+        print(f"Error in device visualization: {str(e)}")
+        return None, None
 
 def clean_and_validate_data(df):
     """Clean and validate the data, ensuring proper formatting for visualization"""
@@ -512,98 +546,63 @@ def load_file_data(file_path):
 def main():
     st.title("Campaign Performance Benchmark Analysis")
     
-    # Add tabs for different analyses
     tab1, tab2 = st.tabs(["Performance Metrics", "Creative Analysis"])
-    
-    # Initialize session state
-    if 'df' not in st.session_state:
-        st.session_state.df = None
-    if 'current_file' not in st.session_state:
-        st.session_state.current_file = None
     
     with tab1:
         st.write("### Campaign Data")
         
-        # File upload section
-        uploaded_file = st.file_uploader("Drag and drop file or select the file", type=['csv'], key="file_uploader")
+        uploaded_file = st.file_uploader("Upload CSV file", type=['csv'])
         
         if uploaded_file is not None:
             try:
-                # Read the file
                 df = pd.read_csv(uploaded_file)
                 
-                # Clean and validate data first
-                cleaned_df, error = clean_and_validate_data(df)
-                if error:
-                    st.error(error)
-                    st.stop()
-                
-                # Show the raw data structure
-                st.write("### Data Structure")
-                st.write("First few rows of your data:")
-                st.dataframe(cleaned_df.head())
-                
-                # Save the cleaned data
-                st.session_state.df = cleaned_df
-                st.session_state.current_file = uploaded_file.name
-                
-                st.success("✅ File uploaded and processed successfully!")
-                
-                # Analysis section
                 st.markdown("---")
                 st.write("### Analysis Options")
                 
                 benchmark_categories = ['Format', 'Size', 'Placement_Name', 'Vertical']
                 selected_category = st.selectbox("Select benchmark category:", benchmark_categories)
                 
-                if selected_category in cleaned_df.columns:
-                    try:
-                        # Calculate and display benchmarks
-                        benchmarks, missing_metrics = calculate_benchmarks(cleaned_df, selected_category)
+                if selected_category in df.columns:
+                    benchmarks, _ = calculate_benchmarks(df, selected_category)
+                    
+                    if not benchmarks.empty:
+                        st.subheader(f"Benchmark Metrics by {selected_category}")
+                        st.dataframe(benchmarks)
                         
-                        if not benchmarks.empty:
-                            st.subheader(f"Benchmark Metrics by {selected_category}")
-                            st.dataframe(benchmarks)
-                            
-                            # Engagement Rate visualization
+                        if 'Engagement_Rate' in benchmarks.columns:
                             st.subheader("Engagement Rate Analysis")
                             eng_fig = create_benchmark_visualization(
                                 benchmarks, 'Engagement_Rate', 
                                 selected_category, 'Average Engagement Rate'
                             )
                             st.plotly_chart(eng_fig, use_container_width=True)
-                            
-                            # Click Rate visualization
+                        
+                        if 'Click_Rate' in benchmarks.columns:
                             st.subheader("Click Rate Analysis")
                             click_fig = create_benchmark_visualization(
                                 benchmarks, 'Click_Rate',
                                 selected_category, 'Average Click Rate'
                             )
                             st.plotly_chart(click_fig, use_container_width=True)
-                            
-                            # Device Performance Analysis
-                            st.subheader("Device Performance Analysis")
-                            device_pie, device_rates = create_device_visualization(cleaned_df, selected_category)
-                            if device_pie and device_rates:
-                                st.plotly_chart(device_pie, use_container_width=True)
-                                st.plotly_chart(device_rates, use_container_width=True)
-                            
-                            # Detailed device performance
+                        
+                        st.subheader("Device Performance Analysis")
+                        device_pie, device_rates = create_device_visualization(df, selected_category)
+                        if device_pie:
+                            st.plotly_chart(device_pie, use_container_width=True)
+                        if device_rates:
+                            st.plotly_chart(device_rates, use_container_width=True)
+                        
+                        device_perf = analyze_device_performance(df, selected_category)
+                        if not device_perf.empty:
                             st.write("Detailed Device Performance:")
-                            device_perf = analyze_device_performance(cleaned_df, selected_category)
                             st.dataframe(device_perf)
-                        else:
-                            st.warning("No data available for the selected category.")
-                            
-                    except Exception as e:
-                        st.error(f"Error creating visualizations: {str(e)}")
-                        st.exception(e)
+                    else:
+                        st.warning("No data available for the selected category.")
                 else:
                     st.warning(f"Column {selected_category} not found in the data")
-                
             except Exception as e:
-                st.error(f"Error processing file: {str(e)}")
-                st.exception(e)
+                st.error("Error processing data. Please check your CSV file format.")
 
     with tab2:
         st.subheader("Creative Analysis")
