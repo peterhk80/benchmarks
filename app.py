@@ -163,67 +163,52 @@ def format_percentage(value):
         return str(value)
 
 def calculate_benchmarks(df, group_by_column):
-    """Calculate benchmark metrics for a given grouping with flexible column matching"""
-    
-    def find_columns(keywords):
-        """Helper to find columns matching any of the given keywords"""
-        return [col for col in df.columns if any(keyword.lower() in col.lower() for keyword in keywords)]
-    
-    # Find relevant metric columns dynamically
-    impression_cols = find_columns(['impression', 'delivered', 'views'])
-    engagement_cols = find_columns(['engagement', 'interact'])
-    click_cols = find_columns(['click', 'ctr'])
-    video_cols = find_columns(['video', 'completion', 'duration'])
-    
-    # Initialize metrics dictionary with found columns
-    metrics = {}
-    
-    # Add available metrics with appropriate aggregations
-    for col in impression_cols:
-        metrics[col] = ['mean', 'sum', 'count']
-    
-    for col in engagement_cols + click_cols:
-        metrics[col] = ['mean']
-    
-    for col in video_cols:
-        if any(x in col.lower() for x in ['rate', 'completion']):
-            metrics[col] = ['mean']
-        elif 'duration' in col.lower():
-            metrics[col] = ['mean', 'median']
-    
-    # If we have no metrics at all, try to use numeric columns as a fallback
-    if not metrics:
-        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
-        for col in numeric_cols:
-            metrics[col] = ['mean']
+    """Calculate benchmark metrics for a given grouping"""
+    try:
+        # Define the exact metrics we care about
+        metrics = {}
+        
+        # Basic metrics
+        if 'Delivered_Impressions' in df.columns:
+            metrics['Delivered_Impressions'] = ['mean', 'sum']
+        if 'Engagement_Rate' in df.columns:
+            metrics['Engagement_Rate'] = ['mean']
+        if 'Click_Rate' in df.columns:
+            metrics['Click_Rate'] = ['mean']
+            
+        # Video metrics
+        video_metrics = ['Video_User_25_Rate', 'Video_User_50_Rate', 
+                        'Video_User_75_Rate', 'Video_User_Completion_Rate']
+        for metric in video_metrics:
+            if metric in df.columns:
+                metrics[metric] = ['mean']
+                
+        # Device metrics
+        device_metrics = [
+            'Desktop_Delivered_Impressions', 'Desktop_Engagement_Rate', 'Desktop_Click_Rate',
+            'Mobile_Delivered_Impressions', 'Mobile_Engagement_Rate', 'Mobile_Click_Rate',
+            'Tablet_Delivered_Impressions', 'Tablet_Engagement_Rate', 'Tablet_Click_Rate'
+        ]
+        for metric in device_metrics:
+            if metric in df.columns:
+                metrics[metric] = ['mean']
         
         if not metrics:
-            return pd.DataFrame(), ["No numeric columns found for analysis"]
-    
-    try:
-        # Calculate benchmarks with available metrics
+            return pd.DataFrame(), ["No metrics found for analysis"]
+        
+        # Calculate benchmarks
         benchmarks = df.groupby(group_by_column).agg(metrics).round(4)
         
         # Flatten column names if we have multi-level columns
         if isinstance(benchmarks.columns, pd.MultiIndex):
             benchmarks.columns = [f"{col[0]}_{col[1]}" for col in benchmarks.columns]
         
-        # Format percentage columns
-        percentage_cols = [col for col in benchmarks.columns if any(x in col.lower() for x in ['rate', 'percentage', 'ratio'])]
-        for col in percentage_cols:
+        # Format percentage columns - anything with 'Rate' in the name
+        rate_cols = [col for col in benchmarks.columns if 'Rate' in col]
+        for col in rate_cols:
             benchmarks[col] = benchmarks[col].apply(lambda x: format_percentage(x) if pd.notnull(x) else x)
         
-        # Get list of metrics we couldn't find
-        standard_metrics = {
-            'Delivered_Impressions': impression_cols,
-            'Engagement_Rate': engagement_cols,
-            'Click_Rate': click_cols,
-            'Video_Completion_Rate': [col for col in video_cols if 'completion' in col.lower()]
-        }
-        
-        missing_metrics = [metric for metric, cols in standard_metrics.items() if not cols]
-        
-        return benchmarks, missing_metrics
+        return benchmarks, []
         
     except Exception as e:
         print(f"Error in calculate_benchmarks: {str(e)}")
@@ -614,21 +599,14 @@ def validate_csv_structure(df):
     return errors, warnings
 
 def clean_and_validate_data(df):
-    """Minimal data cleaning - only handle percentage columns that we know need conversion"""
+    """Clean data by only converting percentage values when they contain % symbols"""
     try:
         df = df.copy()
         
-        # Only convert percentage columns we know about
-        percentage_columns = [
-            'Engagement_Rate', 'Click_Rate', 'Video_User_Completion_Rate',
-            'Video_User_25_Rate', 'Video_User_50_Rate', 'Video_User_75_Rate'
-        ]
-        
-        for col in percentage_columns:
-            if col in df.columns and df[col].dtype == 'object':
-                # Only convert if it contains % symbol
-                if df[col].astype(str).str.contains('%').any():
-                    df[col] = df[col].astype(str).str.rstrip('%').astype(float) / 100
+        # Only convert values that actually contain % symbols
+        for col in df.columns:
+            if df[col].dtype == 'object' and df[col].astype(str).str.contains('%').any():
+                df[col] = df[col].astype(str).str.rstrip('%').astype(float) / 100
         
         return df, None
         
@@ -751,8 +729,22 @@ def main():
         
         if uploaded_file is not None:
             try:
-                # Read and validate the new file
+                # Read the file
                 df = pd.read_csv(uploaded_file)
+                
+                # Show the raw data structure
+                st.write("### Data Structure")
+                st.write("First few rows of your data:")
+                st.dataframe(df.head())
+                
+                st.write("### Column Information")
+                for col in df.columns:
+                    st.write(f"Column: {col}")
+                    st.write(f"Data type: {df[col].dtype}")
+                    st.write(f"Sample values: {df[col].head().tolist()}")
+                    st.write("---")
+                
+                # Continue with the rest of the processing...
                 errors, warnings = validate_csv_structure(df)
                 
                 if errors:
