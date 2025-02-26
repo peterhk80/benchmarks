@@ -242,18 +242,24 @@ def set_chart_style(fig):
 
 def create_benchmark_visualization(df, metric, group_by_column, title):
     """Create horizontal bar chart for benchmark metrics"""
+    # Handle aggregated column names
+    metric_col = f"{metric}_mean" if f"{metric}_mean" in df.columns else metric
+    
     fig = px.bar(df, 
                  y=df.index,  # Swap x and y for horizontal bars
-                 x=metric,
+                 x=metric_col,
                  title=f'{title} by {group_by_column}',
-                 labels={metric: metric.replace('_', ' ')},
-                 text=df[metric],
+                 labels={metric_col: metric.replace('_', ' ')},
+                 text=df[metric_col],
                  orientation='h')  # Set horizontal orientation
     
     fig.update_traces(
         texttemplate='%{text}', 
         textposition='outside',
-        textfont=dict(size=14)
+        textfont=dict(
+            size=16,
+            family="Helvetica Neue Light, Helvetica, Arial, sans-serif"
+        )
     )
     
     # Update layout for better label readability
@@ -775,7 +781,7 @@ def main():
                         # Engagement Rate visualization
                         st.subheader("Engagement Rate Analysis")
                         eng_fig = create_benchmark_visualization(
-                            benchmarks, 'Avg_Engagement_Rate', 
+                            benchmarks, 'Engagement_Rate', 
                             selected_category, 'Average Engagement Rate'
                         )
                         st.plotly_chart(eng_fig)
@@ -787,7 +793,7 @@ def main():
                         # Click Rate visualization
                         st.subheader("Click Rate Analysis")
                         click_fig = create_benchmark_visualization(
-                            benchmarks, 'Avg_Click_Rate',
+                            benchmarks, 'Click_Rate',
                             selected_category, 'Average Click Rate'
                         )
                         st.plotly_chart(click_fig)
