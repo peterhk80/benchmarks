@@ -614,41 +614,21 @@ def validate_csv_structure(df):
     return errors, warnings
 
 def clean_and_validate_data(df):
-    """Clean and validate data with more flexible handling"""
+    """Minimal data cleaning - only handle percentage columns that we know need conversion"""
     try:
-        # Make a copy to avoid modifying original
         df = df.copy()
         
-        # First, identify likely numeric columns (those with mostly numbers)
-        def is_numeric_column(series):
-            # Check if more than 50% of non-null values can be converted to numbers
-            non_null = series.dropna()
-            if len(non_null) == 0:
-                return False
-            numeric_count = sum(pd.to_numeric(non_null, errors='coerce').notna())
-            return numeric_count / len(non_null) > 0.5
-
-        # Process each column
-        for col in df.columns:
-            if df[col].dtype == 'object':  # Only process string columns
-                # Try to detect if it's a percentage column
-                has_percent = df[col].astype(str).str.contains('%').any()
-                
-                # If it's a percentage column
-                if has_percent:
-                    df[col] = df[col].astype(str).str.replace('%', '').astype(float) / 100
-                # If it looks like a numeric column
-                elif is_numeric_column(df[col]):
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-                # Otherwise leave it as is (it's probably text data)
+        # Only convert percentage columns we know about
+        percentage_columns = [
+            'Engagement_Rate', 'Click_Rate', 'Video_User_Completion_Rate',
+            'Video_User_25_Rate', 'Video_User_50_Rate', 'Video_User_75_Rate'
+        ]
         
-        # Remove rows where all numeric columns are NaN
-        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
-        if not numeric_cols.empty:
-            df = df.dropna(subset=numeric_cols, how='all')
-        
-        if df.empty:
-            return None, "No valid data remains after cleaning"
+        for col in percentage_columns:
+            if col in df.columns and df[col].dtype == 'object':
+                # Only convert if it contains % symbol
+                if df[col].astype(str).str.contains('%').any():
+                    df[col] = df[col].astype(str).str.rstrip('%').astype(float) / 100
         
         return df, None
         
