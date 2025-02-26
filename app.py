@@ -165,36 +165,28 @@ def format_percentage(value):
 def calculate_benchmarks(df, group_by_column):
     """Calculate benchmark metrics for a given grouping"""
     try:
-        # Define the exact metrics we care about
+        # Get all numeric columns
+        numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+        
+        # Initialize metrics dictionary
         metrics = {}
         
-        # Basic metrics
-        if 'Delivered_Impressions' in df.columns:
-            metrics['Delivered_Impressions'] = ['mean', 'sum']
-        if 'Engagement_Rate' in df.columns:
-            metrics['Engagement_Rate'] = ['mean']
-        if 'Click_Rate' in df.columns:
-            metrics['Click_Rate'] = ['mean']
-            
-        # Video metrics
-        video_metrics = ['Video_User_25_Rate', 'Video_User_50_Rate', 
-                        'Video_User_75_Rate', 'Video_User_Completion_Rate']
-        for metric in video_metrics:
-            if metric in df.columns:
-                metrics[metric] = ['mean']
-                
-        # Device metrics
-        device_metrics = [
-            'Desktop_Delivered_Impressions', 'Desktop_Engagement_Rate', 'Desktop_Click_Rate',
-            'Mobile_Delivered_Impressions', 'Mobile_Engagement_Rate', 'Mobile_Click_Rate',
-            'Tablet_Delivered_Impressions', 'Tablet_Engagement_Rate', 'Tablet_Click_Rate'
-        ]
-        for metric in device_metrics:
-            if metric in df.columns:
-                metrics[metric] = ['mean']
+        # Add any column that looks like a metric
+        for col in df.columns:
+            col_lower = col.lower()
+            # If it's numeric or contains '%', add it
+            if col in numeric_cols or df[col].astype(str).str.contains('%').any():
+                if any(term in col_lower for term in ['impression', 'delivered', 'view']):
+                    metrics[col] = ['mean', 'sum']
+                elif any(term in col_lower for term in ['rate', 'ratio', 'percentage']):
+                    metrics[col] = ['mean']
+                elif any(term in col_lower for term in ['engagement', 'click', 'interaction']):
+                    metrics[col] = ['mean']
+                else:
+                    metrics[col] = ['mean']
         
         if not metrics:
-            return pd.DataFrame(), ["No metrics found for analysis"]
+            return pd.DataFrame(), ["No numeric or percentage columns found for analysis"]
         
         # Calculate benchmarks
         benchmarks = df.groupby(group_by_column).agg(metrics).round(4)
@@ -203,9 +195,12 @@ def calculate_benchmarks(df, group_by_column):
         if isinstance(benchmarks.columns, pd.MultiIndex):
             benchmarks.columns = [f"{col[0]}_{col[1]}" for col in benchmarks.columns]
         
-        # Format percentage columns - anything with 'Rate' in the name
-        rate_cols = [col for col in benchmarks.columns if 'Rate' in col]
-        for col in rate_cols:
+        # Format percentage columns - any column with 'rate', 'ratio', or '%' in name or data
+        percentage_cols = [col for col in benchmarks.columns 
+                         if ('rate' in col.lower() or 'ratio' in col.lower() 
+                             or df[col.split('_')[0]].astype(str).str.contains('%').any())]
+        
+        for col in percentage_cols:
             benchmarks[col] = benchmarks[col].apply(lambda x: format_percentage(x) if pd.notnull(x) else x)
         
         return benchmarks, []
@@ -599,14 +594,29 @@ def validate_csv_structure(df):
     return errors, warnings
 
 def clean_and_validate_data(df):
-    """Clean data by only converting percentage values when they contain % symbols"""
+    """Clean and validate the data, ensuring proper formatting for visualization"""
     try:
+        # Create a copy to avoid modifying the original
         df = df.copy()
         
-        # Only convert values that actually contain % symbols
+        # Convert percentage strings to floats
         for col in df.columns:
-            if df[col].dtype == 'object' and df[col].astype(str).str.contains('%').any():
-                df[col] = df[col].astype(str).str.rstrip('%').astype(float) / 100
+            if df[col].dtype == 'object':
+                # Check if column contains percentage values
+                if df[col].astype(str).str.contains('%').any():
+                    df[col] = df[col].str.rstrip('%').astype('float') / 100.0
+        
+        # Ensure required columns exist
+        required_metrics = [
+            'Engagement_Rate', 'Click_Rate',
+            'Desktop_Engagement_Rate', 'Mobile_Engagement_Rate', 'Tablet_Engagement_Rate',
+            'Desktop_Click_Rate', 'Mobile_Click_Rate', 'Tablet_Click_Rate',
+            'Desktop_Delivered_Impressions', 'Mobile_Delivered_Impressions', 'Tablet_Delivered_Impressions'
+        ]
+        
+        missing_cols = [col for col in required_metrics if col not in df.columns]
+        if missing_cols:
+            return df, f"Missing required columns: {', '.join(missing_cols)}"
         
         return df, None
         
@@ -732,167 +742,77 @@ def main():
                 # Read the file
                 df = pd.read_csv(uploaded_file)
                 
-                # Show the raw data structure
-                st.write("### Data Structure")
-                st.write("First few rows of your data:")
-                st.dataframe(df.head())
-                
-                st.write("### Column Information")
-                for col in df.columns:
-                    st.write(f"Column: {col}")
-                    st.write(f"Data type: {df[col].dtype}")
-                    st.write(f"Sample values: {df[col].head().tolist()}")
-                    st.write("---")
-                
-                # Continue with the rest of the processing...
-                errors, warnings = validate_csv_structure(df)
-                
-                if errors:
-                    st.error("Please fix the following errors:")
-                    for error in errors:
-                        st.error(f"- {error}")
-                    st.stop()
-                
-                # Clean and validate data
+                # Clean and validate data first
                 cleaned_df, error = clean_and_validate_data(df)
                 if error:
                     st.error(error)
                     st.stop()
                 
-                # Save the file
-                metadata = save_uploaded_file(uploaded_file)
+                # Show the raw data structure
+                st.write("### Data Structure")
+                st.write("First few rows of your data:")
+                st.dataframe(cleaned_df.head())
                 
-                # Update session state
+                # Save the cleaned data
                 st.session_state.df = cleaned_df
-                st.session_state.current_file = metadata['file_path']
+                st.session_state.current_file = uploaded_file.name
                 
-                st.success("✅ File uploaded and saved successfully!")
+                st.success("✅ File uploaded and processed successfully!")
                 
-                # Show non-critical issues
-                if warnings:
-                    with st.expander("ℹ️ View Data Quality Notes"):
-                        for warning in warnings:
-                            st.info(warning)
+                # Analysis section
+                st.markdown("---")
+                st.write("### Analysis Options")
+                
+                benchmark_categories = ['Format', 'Size', 'Placement_Name', 'Vertical']
+                selected_category = st.selectbox("Select benchmark category:", benchmark_categories)
+                
+                if selected_category in cleaned_df.columns:
+                    try:
+                        # Calculate and display benchmarks
+                        benchmarks, missing_metrics = calculate_benchmarks(cleaned_df, selected_category)
+                        
+                        if not benchmarks.empty:
+                            st.subheader(f"Benchmark Metrics by {selected_category}")
+                            st.dataframe(benchmarks)
+                            
+                            # Engagement Rate visualization
+                            st.subheader("Engagement Rate Analysis")
+                            eng_fig = create_benchmark_visualization(
+                                benchmarks, 'Engagement_Rate', 
+                                selected_category, 'Average Engagement Rate'
+                            )
+                            st.plotly_chart(eng_fig, use_container_width=True)
+                            
+                            # Click Rate visualization
+                            st.subheader("Click Rate Analysis")
+                            click_fig = create_benchmark_visualization(
+                                benchmarks, 'Click_Rate',
+                                selected_category, 'Average Click Rate'
+                            )
+                            st.plotly_chart(click_fig, use_container_width=True)
+                            
+                            # Device Performance Analysis
+                            st.subheader("Device Performance Analysis")
+                            device_pie, device_rates = create_device_visualization(cleaned_df, selected_category)
+                            st.plotly_chart(device_pie, use_container_width=True)
+                            st.plotly_chart(device_rates, use_container_width=True)
+                            
+                            # Detailed device performance
+                            st.write("Detailed Device Performance:")
+                            device_perf = analyze_device_performance(cleaned_df, selected_category)
+                            st.dataframe(device_perf)
+                        else:
+                            st.warning("No data available for the selected category.")
+                            
+                    except Exception as e:
+                        st.error(f"Error creating visualizations: {str(e)}")
+                        st.exception(e)
+                else:
+                    st.warning(f"Column {selected_category} not found in the data")
                 
             except Exception as e:
                 st.error(f"Error processing file: {str(e)}")
                 st.exception(e)
-        
-        # Only show analysis options if we have data
-        if st.session_state.df is not None:
-            st.markdown("---")
-            st.write("### Analysis Options")
-            
-            # Rest of your existing analysis code...
-            benchmark_categories = ['Format', 'Size', 'Placement_Name', 'Vertical']
-            selected_category = st.selectbox("Select benchmark category:", benchmark_categories)
-            
-            if selected_category in st.session_state.df.columns:
-                try:
-                    # Calculate and display benchmarks
-                    benchmarks, missing_metrics = calculate_benchmarks(st.session_state.df, selected_category)
-                    
-                    # Show missing metrics in expandable section if there are any
-                    if missing_metrics:
-                        with st.expander("ℹ️ View Missing Metrics"):
-                            st.info("Some metrics are not available in your data:")
-                            for metric in missing_metrics:
-                                st.write(f"- {metric}")
-                    
-                    st.subheader(f"Benchmark Metrics by {selected_category}")
-                    st.dataframe(benchmarks)
-                    
-                    # Download button for benchmarks
-                    st.markdown(get_download_link(benchmarks, 
-                                               f'benchmarks_{selected_category}.csv',
-                                               'Download Benchmark Data'), 
-                              unsafe_allow_html=True)
-                    
-                    # Engagement Rate visualization
-                    st.subheader("Engagement Rate Analysis")
-                    eng_fig = create_benchmark_visualization(
-                        benchmarks, 'Engagement_Rate', 
-                        selected_category, 'Average Engagement Rate'
-                    )
-                    st.plotly_chart(eng_fig)
-                    st.markdown(get_download_link(eng_fig.to_html(), 
-                                               f'engagement_rate_{selected_category}.html',
-                                               'Download Chart'), 
-                              unsafe_allow_html=True)
-                    
-                    # Click Rate visualization
-                    st.subheader("Click Rate Analysis")
-                    click_fig = create_benchmark_visualization(
-                        benchmarks, 'Click_Rate',
-                        selected_category, 'Average Click Rate'
-                    )
-                    st.plotly_chart(click_fig)
-                    st.markdown(get_download_link(click_fig.to_html(),
-                                               f'click_rate_{selected_category}.html',
-                                               'Download Chart'),
-                              unsafe_allow_html=True)
-                    
-                    # Video completion analysis
-                    if 'Video_User_Completion_Rate' in st.session_state.df.columns:
-                        st.subheader("Video Performance Analysis")
-                        video_fig = analyze_video_dropoff(st.session_state.df, selected_category)
-                        st.plotly_chart(video_fig)
-                        st.markdown(get_download_link(video_fig.to_html(),
-                                                   f'video_completion_{selected_category}.html',
-                                                   'Download Chart'),
-                                  unsafe_allow_html=True)
-                    
-                    # Enhanced Device Performance Analysis
-                    st.subheader("Device Performance Analysis")
-                    
-                    # Overall device metrics
-                    device_pie, device_rates = create_device_visualization(st.session_state.df, selected_category)
-                    
-                    # Display device distribution
-                    st.plotly_chart(device_pie)
-                    st.markdown(get_download_link(device_pie.to_html(),
-                                               'device_distribution.html',
-                                               'Download Distribution Chart'),
-                              unsafe_allow_html=True)
-                    
-                    # Display device performance metrics
-                    st.plotly_chart(device_rates)
-                    st.markdown(get_download_link(device_rates.to_html(),
-                                               'device_performance.html',
-                                               'Download Performance Chart'),
-                              unsafe_allow_html=True)
-                    
-                    # Detailed device performance by category
-                    st.write("Detailed Device Performance by Category:")
-                    device_perf = analyze_device_performance(st.session_state.df, selected_category)
-                    st.dataframe(device_perf)
-                    st.markdown(get_download_link(device_perf,
-                                               f'device_performance_{selected_category}.csv',
-                                               'Download Detailed Device Data'),
-                              unsafe_allow_html=True)
-                    
-                    # Additional Insights
-                    st.subheader("Additional Insights")
-                    trends = analyze_trends(st.session_state.df)
-                    
-                    # Device Distribution
-                    st.write("Device Distribution:")
-                    device_dist = pd.DataFrame(trends['device_distribution'].items(), 
-                                             columns=['Device', 'Percentage'])
-                    device_dist['Percentage'] = device_dist['Percentage'].apply(format_percentage)
-                    st.dataframe(device_dist)
-                    
-                    # Video Performance
-                    if trends['video_metrics']['avg_completion_rate'] > 0:
-                        st.write("Video Performance Metrics:")
-                        st.write(f"- Average Video Completion Rate: {format_percentage(trends['video_metrics']['avg_completion_rate'])}")
-                        st.write(f"- Average Video Duration: {trends['video_metrics']['avg_duration']:.2f} seconds")
-                    
-                except Exception as e:
-                    st.error(f"Error processing benchmarks: {str(e)}")
-                    st.exception(e)
-            else:
-                st.warning(f"Column {selected_category} not found in the data")
 
     with tab2:
         st.subheader("Creative Analysis")
