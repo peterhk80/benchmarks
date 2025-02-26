@@ -321,31 +321,68 @@ def create_benchmark_visualization(df, metric, group_by_column, title):
 
 def analyze_video_dropoff(df, group_by_column):
     """Analyze video completion rates at different stages"""
-    video_metrics = ['Video_User_25_Rate', 'Video_User_50_Rate', 
-                    'Video_User_75_Rate', 'Video_User_Completion_Rate']
-    
-    dropoff = df.groupby(group_by_column)[video_metrics].mean()
-    
-    fig = go.Figure()
-    for metric in video_metrics:
-        fig.add_trace(go.Bar(
-            name=metric.replace('Video_User_', '').replace('_Rate', ''),
-            y=dropoff.index,  # Swap x and y for horizontal bars
-            x=dropoff[metric],
-            text=dropoff[metric].round(4),
-            textfont=dict(size=14),
-            orientation='h'  # Set horizontal orientation
-        ))
-    
-    fig.update_layout(
-        title=f'Video Completion Rates by {group_by_column}',
-        barmode='group',
-        yaxis={'categoryorder': 'total ascending'},  # Sort bars
-        xaxis_title='Completion Rate',
-        yaxis_title=group_by_column
-    )
-    
-    return set_chart_style(fig)
+    try:
+        # Create a copy to avoid modifying original data
+        df = df.copy()
+        
+        # Function to safely convert to numeric
+        def safe_numeric_convert(x):
+            try:
+                if isinstance(x, str):
+                    if '%' in x:
+                        return float(x.strip('%')) / 100
+                    elif x.replace('.', '').replace('-', '').isdigit():
+                        return float(x)
+                return x
+            except (ValueError, TypeError):
+                return np.nan
+        
+        video_metrics = ['Video_User_25_Rate', 'Video_User_50_Rate', 
+                        'Video_User_75_Rate', 'Video_User_Completion_Rate']
+        
+        # Convert metrics to numeric
+        numeric_df = df.copy()
+        for metric in video_metrics:
+            if metric in df.columns:
+                numeric_df[metric] = df[metric].apply(safe_numeric_convert)
+        
+        # Calculate means only for columns that exist and have numeric values
+        available_metrics = [
+            metric for metric in video_metrics 
+            if metric in numeric_df.columns and 
+            pd.to_numeric(numeric_df[metric], errors='coerce').notna().any()
+        ]
+        
+        if not available_metrics:
+            return None
+        
+        dropoff = numeric_df.groupby(group_by_column)[available_metrics].agg('mean').round(4)
+        
+        fig = go.Figure()
+        for metric in available_metrics:
+            fig.add_trace(go.Bar(
+                name=metric.replace('Video_User_', '').replace('_Rate', ''),
+                y=dropoff.index,
+                x=dropoff[metric],
+                text=[format_percentage(x) for x in dropoff[metric]],
+                textposition='outside',
+                textfont=dict(size=14),
+                orientation='h'
+            ))
+        
+        fig.update_layout(
+            title=f'Video Completion Rates by {group_by_column}',
+            barmode='group',
+            yaxis={'categoryorder': 'total ascending'},
+            xaxis_title='Completion Rate',
+            yaxis_title=group_by_column
+        )
+        
+        return set_chart_style(fig)
+        
+    except Exception as e:
+        print(f"Error in video dropoff analysis: {str(e)}")
+        return None
 
 def analyze_device_performance(df, group_by_column):
     """Analyze performance across devices"""
