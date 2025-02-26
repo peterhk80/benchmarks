@@ -766,6 +766,9 @@ def main():
     with tab1:
         st.write("### Campaign Data")
         
+        # File upload instruction above the columns
+        st.write("Drag and drop file or select the file:")
+        
         # File selection/upload section
         col1, col2 = st.columns([2, 1])
         
@@ -794,21 +797,34 @@ def main():
                             st.success(f"✅ Loaded saved file: {selected_meta['original_name']}")
         
         with col2:
-            st.write("Drag and drop file or select the file:")
-            col2_1, col2_2 = st.columns([4, 1])
-            with col2_1:
-                uploaded_file = st.file_uploader("", type=['csv'])
-            with col2_2:
-                st.markdown("""
-                    <style>
-                    .upload-icon {
-                        font-size: 24px;
-                        color: #0096FF;
-                        margin-top: 22px;
-                    }
-                    </style>
-                    <i class="fas fa-upload upload-icon"></i>
-                    """, unsafe_allow_html=True)
+            st.markdown("""
+                <style>
+                .upload-text {
+                    position: absolute;
+                    left: 0;
+                    top: -25px;
+                    width: 100%;
+                    text-align: left;
+                    padding: 0 10px;
+                    color: rgb(49, 51, 63);
+                    font-size: 14px;
+                }
+                .upload-icon {
+                    position: absolute;
+                    right: 10px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    font-size: 20px;
+                    color: #0096FF;
+                }
+                .stFileUploader {
+                    padding-right: 40px;
+                }
+                </style>
+                <div class="upload-text">Drag and drop file or select the file:</div>
+                <i class="fas fa-upload upload-icon"></i>
+                """, unsafe_allow_html=True)
+            uploaded_file = st.file_uploader("", type=['csv'])
             
             if uploaded_file is not None:
                 try:
