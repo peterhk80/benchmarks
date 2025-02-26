@@ -766,102 +766,45 @@ def main():
     with tab1:
         st.write("### Campaign Data")
         
-        # File upload instruction above the columns
-        st.write("Drag and drop file or select the file:")
+        # File upload section
+        uploaded_file = st.file_uploader("Drag and drop file or select the file", type=['csv'], key="file_uploader")
         
-        # File selection/upload section
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            # Load saved files
-            saved_files = load_saved_files()
-            if saved_files:
-                saved_options = ['Select a saved file...'] + [
-                    f"{meta['original_name']} (uploaded {meta['upload_date']})"
-                    for meta in saved_files.values()
-                ]
-                selected_saved = st.selectbox("Select from saved files:", saved_options)
+        if uploaded_file is not None:
+            try:
+                # Read and validate the new file
+                df = pd.read_csv(uploaded_file)
+                errors, warnings = validate_csv_structure(df)
                 
-                if selected_saved and selected_saved != 'Select a saved file...':
-                    # Find the corresponding metadata
-                    selected_meta = next(
-                        meta for meta in saved_files.values()
-                        if f"{meta['original_name']} (uploaded {meta['upload_date']})" == selected_saved
-                    )
-                    
-                    if selected_meta['file_path'] != st.session_state.current_file:
-                        df = load_file_data(selected_meta['file_path'])
-                        if df is not None:
-                            st.session_state.df = df
-                            st.session_state.current_file = selected_meta['file_path']
-                            st.success(f"✅ Loaded saved file: {selected_meta['original_name']}")
-        
-        with col2:
-            st.markdown("""
-                <style>
-                .upload-text {
-                    position: absolute;
-                    left: 0;
-                    top: -25px;
-                    width: 100%;
-                    text-align: left;
-                    padding: 0 10px;
-                    color: rgb(49, 51, 63);
-                    font-size: 14px;
-                }
-                .upload-icon {
-                    position: absolute;
-                    right: 10px;
-                    top: 50%;
-                    transform: translateY(-50%);
-                    font-size: 20px;
-                    color: #0096FF;
-                }
-                .stFileUploader {
-                    padding-right: 40px;
-                }
-                </style>
-                <div class="upload-text">Drag and drop file or select the file:</div>
-                <i class="fas fa-upload upload-icon"></i>
-                """, unsafe_allow_html=True)
-            uploaded_file = st.file_uploader("", type=['csv'])
-            
-            if uploaded_file is not None:
-                try:
-                    # Read and validate the new file
-                    df = pd.read_csv(uploaded_file)
-                    errors, warnings = validate_csv_structure(df)
-                    
-                    if errors:
-                        st.error("Please fix the following errors:")
-                        for error in errors:
-                            st.error(f"- {error}")
-                        st.stop()
-                    
-                    # Clean and validate data
-                    cleaned_df, error = clean_and_validate_data(df)
-                    if error:
-                        st.error(error)
-                        st.stop()
-                    
-                    # Save the file
-                    metadata = save_uploaded_file(uploaded_file)
-                    
-                    # Update session state
-                    st.session_state.df = cleaned_df
-                    st.session_state.current_file = metadata['file_path']
-                    
-                    st.success("✅ File uploaded and saved successfully!")
-                    
-                    # Show non-critical issues
-                    if warnings:
-                        with st.expander("ℹ️ View Data Quality Notes"):
-                            for warning in warnings:
-                                st.info(warning)
-                    
-                except Exception as e:
-                    st.error(f"Error processing file: {str(e)}")
-                    st.exception(e)
+                if errors:
+                    st.error("Please fix the following errors:")
+                    for error in errors:
+                        st.error(f"- {error}")
+                    st.stop()
+                
+                # Clean and validate data
+                cleaned_df, error = clean_and_validate_data(df)
+                if error:
+                    st.error(error)
+                    st.stop()
+                
+                # Save the file
+                metadata = save_uploaded_file(uploaded_file)
+                
+                # Update session state
+                st.session_state.df = cleaned_df
+                st.session_state.current_file = metadata['file_path']
+                
+                st.success("✅ File uploaded and saved successfully!")
+                
+                # Show non-critical issues
+                if warnings:
+                    with st.expander("ℹ️ View Data Quality Notes"):
+                        for warning in warnings:
+                            st.info(warning)
+                
+            except Exception as e:
+                st.error(f"Error processing file: {str(e)}")
+                st.exception(e)
         
         # Only show analysis options if we have data
         if st.session_state.df is not None:
