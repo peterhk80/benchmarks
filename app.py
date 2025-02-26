@@ -26,29 +26,31 @@ st.set_page_config(
 # Add custom CSS for logo positioning and header styling
 st.markdown("""
     <style>
-        /* Remove default red from buttons and tabs */
+        /* Button styling */
         .stButton button {
-            background-color: #0066cc;
+            background-color: #2E8B57;  /* Sea Green */
             color: white;
             border: none;
             border-radius: 4px;
             padding: 0.5rem 1rem;
         }
         .stButton button:hover {
-            background-color: #0052a3;
+            background-color: #3CB371;  /* Medium Sea Green */
         }
-        /* Style tabs */
+        
+        /* Tab styling */
         .stTabs [data-baseweb="tab-list"] {
             gap: 24px;
         }
         .stTabs [data-baseweb="tab"] {
-            color: #0066cc;
+            color: #2E8B57;  /* Sea Green */
             border-radius: 4px 4px 0 0;
         }
         .stTabs [aria-selected="true"] {
-            background-color: #0066cc !important;
+            background-color: #2E8B57 !important;  /* Sea Green */
             color: white !important;
         }
+        
         /* Header styling */
         h1 {
             font-size: 1.8rem !important;
@@ -66,19 +68,37 @@ st.markdown("""
             font-weight: 500 !important;
             font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
         }
-        /* Set default font */
+        
+        /* Default font */
         .stMarkdown, .stText {
             font-family: "Helvetica Neue Light", Helvetica, Arial, sans-serif !important;
         }
-        /* Style selectbox */
+        
+        /* Selectbox styling */
         .stSelectbox [data-baseweb="select"] {
             border-radius: 4px;
         }
-        /* Style file uploader */
+        
+        /* File uploader styling */
         .stFileUploader {
-            border: 2px dashed #0066cc;
+            border: 2px dashed #2E8B57;  /* Sea Green */
             border-radius: 4px;
             padding: 1rem;
+        }
+        
+        /* Error message styling */
+        .stAlert {
+            border-color: #2E8B57 !important;  /* Sea Green */
+            color: #333333 !important;  /* Dark Grey */
+        }
+        
+        /* Input field styling */
+        .stTextInput input {
+            border-color: #2E8B57 !important;  /* Sea Green */
+        }
+        .stTextInput input:focus {
+            border-color: #3CB371 !important;  /* Medium Sea Green */
+            box-shadow: 0 0 0 1px #3CB371 !important;  /* Medium Sea Green */
         }
     </style>
     """, unsafe_allow_html=True)
@@ -398,7 +418,9 @@ def analyze_device_performance(df, group_by_column):
                         return float(x.strip('%')) / 100
                     elif x.replace('.', '').replace('-', '').isdigit():
                         return float(x)
-                return x
+                elif isinstance(x, (int, float)):
+                    return float(x)
+                return np.nan
             except (ValueError, TypeError):
                 return np.nan
         
@@ -410,25 +432,24 @@ def analyze_device_performance(df, group_by_column):
         }
         
         # Convert metrics to numeric before aggregation
-        numeric_df = df.copy()
+        numeric_df = pd.DataFrame()
+        numeric_df[group_by_column] = df[group_by_column]
+        
         for device_list in device_metrics.values():
             for metric in device_list:
                 if metric in df.columns:
                     numeric_df[metric] = df[metric].apply(safe_numeric_convert)
         
-        # Calculate device performance using numeric data
-        agg_dict = {}
-        for device_list in device_metrics.values():
-            for metric in device_list:
-                if metric in numeric_df.columns:
-                    # Only include columns that have some numeric values
-                    if pd.to_numeric(numeric_df[metric], errors='coerce').notna().any():
-                        agg_dict[metric] = 'mean'
+        # Remove columns with all NaN values
+        numeric_cols = numeric_df.columns.drop(group_by_column)
+        valid_cols = [col for col in numeric_cols if numeric_df[col].notna().any()]
         
-        if not agg_dict:
+        if not valid_cols:
+            print("No valid numeric columns found")
             return pd.DataFrame()
-            
-        device_performance = numeric_df.groupby(group_by_column).agg(agg_dict).round(4)
+        
+        # Calculate device performance using only valid numeric columns
+        device_performance = numeric_df.groupby(group_by_column)[valid_cols].agg('mean').round(4)
         
         # Format percentage columns
         for col in device_performance.columns:
