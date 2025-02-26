@@ -782,21 +782,8 @@ def main():
                 df = clean_percentage_columns(df)
                 st.session_state.df = df  # Store in session state
                 
-                # Display data summary
-                st.success("Data successfully loaded and cleaned!")
-                st.write("### Data Summary")
-                st.write(f"- Total rows: {len(df)}")
-                st.write(f"- Total columns: {len(df.columns)}")
-                
-                # Display sample of the data
-                with st.expander("Preview Data"):
-                    st.dataframe(df.head())
-                
-                # Check if Creative_URL column exists
-                has_creative_urls = 'Creative_URL' in df.columns
-                if has_creative_urls:
-                    valid_urls = df['Creative_URL'].apply(validate_creative_url).sum()
-                    st.info(f"Found {valid_urls} valid creative URLs! You can analyze them in the Creative Analysis tab.")
+                # Simple success message with scroll instruction
+                st.success("✅ Data loaded successfully! Scroll down to view your benchmark report.")
                 
                 # Main benchmark categories
                 benchmark_categories = ['Format', 'Size', 'Placement_Name', 'Vertical']
